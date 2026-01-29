@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ラインヴァニッシュ (完全版)</title>
+    <title>ラインヴァニッシュ (修正済)</title>
     
     <!-- 必要なライブラリ -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
@@ -143,7 +143,7 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
     
     <button class="btn btn-primary" onclick="Game.initLocal()">ひとりで遊ぶ (練習)</button>
     <button class="btn btn-accent" onclick="Network.openMenu()">ふたりで対戦 (通信)</button>
-    <div style="margin-top:20px; font-size:0.8rem; color:#666;">完全版 v1.0</div>
+    <div style="margin-top:20px; font-size:0.8rem; color:#666;">修正版 v1.1</div>
 </div>
 
 <!-- 2. ネットワークメニュー -->
@@ -219,8 +219,8 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
 
 <script>
 /**
- * LINE VANISH - COMPLETE EDITION
- * 日本語化・QR対応・視覚ガイド強化
+ * LINE VANISH - COMPLETE EDITION (FIXED)
+ * 修正: Network.openMenuの実装漏れ解消
  */
 
 // 音声機能
@@ -256,10 +256,19 @@ const Sound = {
     }
 };
 
-// ネットワーク機能
+// ネットワーク機能 (修正版)
 const Network = {
     peer: null, conn: null, isHost: false, scanner: null,
     
+    // 【修正】メニューを開く機能を追加
+    openMenu() {
+        document.querySelectorAll('.screen').forEach(e => e.classList.remove('active'));
+        document.getElementById('screen-network').classList.add('active');
+        document.getElementById('net-select').style.display='flex';
+        document.getElementById('net-host').style.display='none';
+        document.getElementById('net-guest').style.display='none';
+    },
+
     initHost() {
         Sound.init();
         document.getElementById('net-select').style.display='none';
@@ -456,9 +465,7 @@ const Game = {
             if(this.hp[defender] <= 0) {
                 this.gameOver(attacker);
             } else {
-                // 攻撃成功後は盤面リセットして、攻撃した側(attacker)のターンから再開
-                // (あるいはルールによっては交代だが、揃えたボーナスとして継続もアリ。
-                //  ここではシンプルに「盤面クリアして交代」にします)
+                // 盤面クリアして交代
                 this.board.fill(null);
                 this.moves = { p1: [], p2: [] };
                 this.turn = defender; // 攻撃された側から再開
