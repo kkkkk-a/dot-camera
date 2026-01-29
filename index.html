@@ -3,634 +3,534 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ラインヴァニッシュ - QR Edition</title>
-    <!-- PeerJS -->
+    <title>ラインヴァニッシュ (完全版)</title>
+    
+    <!-- 必要なライブラリ -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <!-- QR Code Libs -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    
-    <!-- Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
-    <style>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;900&display=swap" rel="stylesheet">
+
+<style>
 :root {
-    --bg-color: #0a0b10;
-    --panel-bg: rgba(20, 25, 35, 0.95);
-    --primary-x: #00f2ff;
-    --primary-o: #ff0055;
-    --accent-gold: #ffd700;
-    --text-color: #e0e6ed;
-    --glass-border: 1px solid rgba(255, 255, 255, 0.15);
-    --neon-shadow-x: 0 0 10px rgba(0, 242, 255, 0.6);
-    --neon-shadow-o: 0 0 10px rgba(255, 0, 85, 0.6);
+    --bg-color: #2b2b2b;
+    --text-color: #fff;
+    --p1-color: #4facfe; /* 青 (自分) */
+    --p2-color: #ff5858; /* 赤 (相手) */
+    --grid-bg: #3e3e3e;
+    --cell-bg: #4a4a4a;
 }
 
 body {
-    font-family: 'Orbitron', 'Noto Sans JP', sans-serif;
-    background: radial-gradient(circle at center, #1a1f2c 0%, #050505 100%);
-    color: var(--text-color);
-    display: flex; justify-content: center; align-items: center;
-    min-height: 100vh; margin: 0; overflow: hidden;
-    touch-action: manipulation; user-select: none;
+    margin: 0; background: var(--bg-color); color: var(--text-color);
+    font-family: 'M PLUS Rounded 1c', sans-serif;
+    height: 100vh; overflow: hidden; touch-action: manipulation;
+    display: flex; justify-content: center; align-items: center; user-select: none;
 }
 
-.bg-grid {
-    position: absolute; width: 200%; height: 200%;
-    background-image: 
-        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-    background-size: 50px 50px;
-    transform: perspective(500px) rotateX(60deg) translateY(-100px) translateZ(-200px);
-    animation: gridMove 20s linear infinite; z-index: -1; pointer-events: none;
+/* 画面管理 */
+.screen {
+    position: absolute; width: 100%; height: 100%;
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    background: var(--bg-color); z-index: 1; transition: opacity 0.3s;
 }
-@keyframes gridMove {
-    0% { transform: perspective(500px) rotateX(60deg) translateY(0) translateZ(-200px); }
-    100% { transform: perspective(500px) rotateX(60deg) translateY(50px) translateZ(-200px); }
-}
+.screen.active { display: flex; z-index: 10; }
 
-.container {
-    position: relative; background: var(--panel-bg);
-    padding: 30px; border-radius: 20px;
-    backdrop-filter: blur(10px); border: var(--glass-border);
-    box-shadow: 0 20px 50px rgba(0,0,0,0.6);
-    width: 400px; max-width: 95vw; text-align: center;
+/* 共通UI */
+h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 4px 0 rgba(0,0,0,0.3); }
+.btn {
+    width: 80%; max-width: 320px; padding: 18px; margin: 10px;
+    border: none; border-radius: 15px;
+    font-size: 1.2rem; font-weight: bold; cursor: pointer;
+    box-shadow: 0 5px 0 rgba(0,0,0,0.3); transition: transform 0.1s;
+    background: #fff; color: #333;
 }
+.btn:active { transform: translateY(5px); box-shadow: none; }
+.btn-primary { background: var(--p1-color); color: #fff; }
+.btn-accent { background: var(--p2-color); color: #fff; }
 
-h1 {
-    font-size: 24px; letter-spacing: 3px; margin: 0 0 20px 0;
-    text-transform: uppercase; background: linear-gradient(90deg, #fff, #aaa);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    text-shadow: 0 0 20px rgba(255,255,255,0.2);
+.input-box {
+    font-size: 1.2rem; padding: 12px; width: 70%; text-align: center;
+    border: none; border-radius: 8px; margin: 10px 0; background: #fff; color: #333;
 }
 
-/* HUD */
-.hud { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.player-stats {
-    width: 35%; padding: 8px; border-radius: 8px;
-    background: rgba(0,0,0,0.4); border: 1px solid transparent; transition: all 0.3s;
+/* ネットワーク画面 */
+#qr-display { background: #fff; padding: 15px; border-radius: 10px; margin: 20px; }
+#camera-wrapper { width: 90%; max-width: 300px; margin: 10px; border: 4px solid #fff; border-radius: 8px; overflow: hidden; display: none; }
+
+/* ゲーム画面レイアウト */
+.game-container {
+    width: 100%; max-width: 500px; height: 100%;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 20px; box-sizing: border-box;
 }
-.player-stats.active-x { border-color: var(--primary-x); box-shadow: inset 0 0 15px rgba(0, 242, 255, 0.2); transform: scale(1.05); }
-.player-stats.active-o { border-color: var(--primary-o); box-shadow: inset 0 0 15px rgba(255, 0, 85, 0.2); transform: scale(1.05); }
-.player-stats.inactive { opacity: 0.4; filter: grayscale(0.8); }
 
-.p-name { font-size: 12px; margin-bottom: 5px; display: block; font-weight: bold; }
-.p-x { color: var(--primary-x); }
-.p-o { color: var(--primary-o); }
-.you-indicator { font-size: 9px; background: #fff; color: #000; padding: 1px 3px; border-radius: 3px; margin-left: 4px; display: none; vertical-align: middle; }
+/* プレイヤー情報 (HPバー) */
+.hud { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 10px; }
+.player-info { width: 45%; display: flex; flex-direction: column; gap: 5px; }
+.player-name { font-size: 0.9rem; font-weight: bold; display: flex; justify-content: space-between; }
+.hp-bar-bg { width: 100%; height: 15px; background: #555; border-radius: 10px; overflow: hidden; border: 2px solid #666; }
+.hp-bar { height: 100%; width: 100%; transition: width 0.5s ease; }
 
-.hp-bar-container { width: 100%; height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
-.hp-bar { height: 100%; width: 100%; transition: width 0.5s cubic-bezier(0.25, 1, 0.5, 1); }
-.hp-x { background: var(--primary-x); box-shadow: 0 0 8px var(--primary-x); }
-.hp-o { background: var(--primary-o); box-shadow: 0 0 8px var(--primary-o); }
+.p1-style .hp-bar { background: var(--p1-color); }
+.p1-style .player-name { color: var(--p1-color); }
+.p2-style .hp-bar { background: var(--p2-color); }
+.p2-style .player-name { color: var(--p2-color); }
 
-/* Timer */
-.timer-box { width: 20%; text-align: center; }
-.timer {
-    font-size: 2rem; font-weight: bold; color: var(--accent-gold);
-    text-shadow: 0 0 10px var(--accent-gold); line-height: 1;
+/* メッセージエリア */
+.status-msg {
+    font-size: 1.2rem; font-weight: bold; text-align: center;
+    background: rgba(0,0,0,0.3); padding: 10px; border-radius: 10px;
+    margin-bottom: 20px; min-height: 1.5em;
 }
-.timer.warning { color: var(--primary-o); animation: blink-warn 0.5s infinite alternate; }
-@keyframes blink-warn { from { opacity: 1; text-shadow: 0 0 15px red; } to { opacity: 0.5; } }
 
-/* Board */
-#game-board {
+/* 盤面 (3x3) */
+.board {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-    margin: 0 auto 20px; width: 100%; aspect-ratio: 1;
-    position: relative;
+    width: 100%; aspect-ratio: 1; margin: 0 auto;
+    background: var(--grid-bg); padding: 10px; border-radius: 15px;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.5); box-sizing: border-box;
 }
-/* 相手ターン時の操作ブロック用 */
-#game-board.blocked { pointer-events: none; opacity: 0.8; }
-#game-board.blocked::after {
-    content: "WAIT"; position: absolute; top:50%; left:50%; transform: translate(-50%, -50%);
-    font-size: 3rem; color: rgba(255,255,255,0.1); font-weight: 900; z-index: 0; pointer-events: none;
-}
-
 .cell {
-    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px; display: flex; justify-content: center; align-items: center;
-    font-size: 3.5rem; font-weight: 900; cursor: pointer; position: relative; overflow: hidden;
-    transition: 0.2s; z-index: 1;
+    background: var(--cell-bg); border-radius: 10px;
+    display: flex; justify-content: center; align-items: center;
+    font-size: 4rem; font-weight: 900; cursor: pointer;
+    transition: 0.2s; position: relative;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
 }
 .cell:active { transform: scale(0.95); }
-.cell.taken { cursor: default; }
-.cell.x { color: var(--primary-x); text-shadow: var(--neon-shadow-x); }
-.cell.o { color: var(--primary-o); text-shadow: var(--neon-shadow-o); }
+.cell.marked { cursor: default; }
 
-/* 次に消えるマスの予告 */
-.cell.fading { border-color: rgba(255, 0, 0, 0.5); animation: pulse-border 1.5s infinite; }
-.cell.fading::before {
-    content: ''; position: absolute; top:0; left:0; width:100%; height:100%;
-    box-shadow: inset 0 0 15px rgba(255,0,0,0.3); pointer-events: none;
+/* コマのスタイル */
+.mark-x { color: var(--p1-color); text-shadow: 0 0 10px rgba(79, 172, 254, 0.5); } /* 青 */
+.mark-o { color: var(--p2-color); text-shadow: 0 0 10px rgba(255, 88, 88, 0.5); } /* 赤 */
+
+/* 消滅予告 (点滅) */
+.cell.fading {
+    opacity: 0.5; border: 3px solid #ffcc00;
+    animation: pulse 1s infinite alternate;
 }
-@keyframes pulse-border { 0% { border-color: rgba(255,0,0,0.3); } 100% { border-color: rgba(255,0,0,0.8); } }
-
-/* Status & Buttons */
-#status-display { font-size: 14px; color: #888; margin-bottom: 15px; min-height: 20px; font-weight: bold; }
-
-.btn-group { display: flex; justify-content: center; gap: 10px; }
-.btn {
-    background: rgba(0,0,0,0.6); border: 1px solid var(--accent-gold); color: var(--accent-gold);
-    padding: 10px 20px; font-family: 'Orbitron'; font-size: 0.9rem; font-weight: bold;
-    cursor: pointer; transition: 0.3s; flex: 1;
+.cell.fading::after {
+    content: "消える!"; position: absolute; font-size: 0.8rem;
+    bottom: 5px; color: #ffcc00; font-weight: bold;
 }
-.btn:hover { background: var(--accent-gold); color: #000; }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #555; color: #555; background: transparent; }
-.btn-back { border-color: #666; color: #aaa; }
-.btn-back:hover { background: #666; color: #fff; }
+@keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }
 
-/* Overlay Menus */
-.overlay {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    background: #0a0b10; z-index: 50; border-radius: 20px;
-    display: flex; flex-direction: column; align-items: center; padding: 20px; box-sizing: border-box;
+/* モーダル */
+.modal {
+    position: absolute; top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.9); z-index: 20;
+    display: none; flex-direction: column; justify-content: center; align-items: center;
 }
-.menu-content { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 15px; }
+.modal h2 { font-size: 3rem; margin-bottom: 20px; }
+.win { color: var(--p1-color); }
+.lose { color: var(--p2-color); }
 
-/* QR Styles */
-#qrcode-display { background: #fff; padding: 10px; border-radius: 8px; margin: 10px 0; }
-#qrcode-display img { display: block; }
-#qr-reader { width: 100%; max-width: 250px; border: 1px solid var(--primary-x); display: none; margin-bottom: 10px; }
-
-.input-group { display: flex; gap: 5px; width: 100%; justify-content: center; }
-input[type="text"] {
-    background: #111; border: 1px solid #444; color: white; padding: 10px;
-    font-family: 'Roboto Mono'; width: 60%; text-align: center; border-radius: 4px;
-}
-.id-box { 
-    background: #000; color: var(--primary-x); padding: 8px; border: 1px dashed #444; 
-    font-family: monospace; font-size: 12px; margin: 5px 0; width: 100%; box-sizing: border-box; word-break: break-all;
+/* 操作ブロック用オーバーレイ */
+#blocker {
+    position: absolute; top:0; left:0; width:100%; height:100%;
+    background: transparent; z-index: 5; display: none;
 }
 
-.blink { animation: blink 1s infinite alternate; }
-@keyframes blink { from { opacity: 0.4; } to { opacity: 1; } }
-    </style>
+</style>
 </head>
 <body>
 
-<div class="bg-grid"></div>
-
-<div class="container" id="game-container">
+<!-- 1. タイトル画面 -->
+<div id="screen-title" class="screen active">
+    <h1>ライン<br>ヴァニッシュ</h1>
+    <div style="color:#aaa; margin-bottom:30px;">消える三目並べ</div>
     
-    <!-- メニュー画面 -->
-    <div id="menu-overlay" class="overlay">
-        <div id="main-menu" class="menu-content">
-            <h2 style="font-family:'Orbitron'; letter-spacing:2px; margin-bottom:5px;">LINE VANISH</h2>
-            <div style="font-size:0.7rem; color:#666; margin-bottom:20px;">QR CONNECT EDITION</div>
-            
-            <button class="btn" onclick="Game.initHost()">ルーム作成 (HOST)</button>
-            <div style="font-size:0.8rem; color:#444;">OR</div>
-            
-            <div id="qr-reader"></div> <!-- カメラ映像 -->
-            
-            <div class="input-group">
-                <input type="text" id="join-id" placeholder="HOST ID">
-                <button class="btn" style="padding:10px; flex:0;" onclick="Game.toggleScanner()">📷</button>
-            </div>
-            <button class="btn" onclick="Game.joinRoom()">ID入力で参加</button>
-            
-            <div style="margin-top:15px; width:100%; border-top:1px solid #333;"></div>
-            <button class="btn btn-back" style="margin-top:10px;" onclick="Game.initLocal()">オフライン (1人/対面)</button>
-        </div>
+    <button class="btn btn-primary" onclick="Game.initLocal()">ひとりで遊ぶ (練習)</button>
+    <button class="btn btn-accent" onclick="Network.openMenu()">ふたりで対戦 (通信)</button>
+    <div style="margin-top:20px; font-size:0.8rem; color:#666;">完全版 v1.0</div>
+</div>
 
-        <div id="host-screen" class="menu-content" style="display:none;">
-            <p style="font-size:0.9rem;">QRコードを読み取ってください</p>
-            <div id="qrcode-display"></div>
-            <div id="host-id-text" class="id-box">GENERATING...</div>
-            <div class="blink" style="color:var(--accent-gold); font-size:0.8rem;">接続待ち...</div>
-            <button class="btn btn-back" onclick="location.reload()">キャンセル</button>
-        </div>
-
-        <div id="loading-screen" class="menu-content" style="display:none;">
-            <div class="blink" style="color:var(--primary-x)">CONNECTING...</div>
-        </div>
+<!-- 2. ネットワークメニュー -->
+<div id="screen-network" class="screen">
+    <h2>通信対戦</h2>
+    
+    <div id="net-select" style="width:100%; display:flex; flex-direction:column; align-items:center;">
+        <button class="btn btn-primary" onclick="Network.initHost()">部屋をつくる (ホスト)</button>
+        <div style="margin:10px;">または</div>
+        <button class="btn btn-accent" onclick="Network.showGuest()">部屋に入る (ゲスト)</button>
+        <button class="btn" onclick="location.reload()" style="margin-top:20px;">もどる</button>
     </div>
 
-    <!-- ゲーム画面 -->
-    <h1>NEO TACTICS</h1>
-
-    <div class="hud">
-        <div class="player-stats active-x" id="p-x">
-            <span class="p-name p-x">PLAYER X <span id="you-x" class="you-indicator">YOU</span></span>
-            <div class="hp-bar-container"><div class="hp-bar hp-x" id="hp-x-bar"></div></div>
-        </div>
-        
-        <div class="timer-box">
-            <div id="timer" class="timer">15</div>
-        </div>
-
-        <div class="player-stats" id="p-o">
-            <span class="p-name p-o">PLAYER O <span id="you-o" class="you-indicator">YOU</span></span>
-            <div class="hp-bar-container"><div class="hp-bar hp-o" id="hp-o-bar"></div></div>
-        </div>
+    <div id="net-host" style="display:none; flex-direction:column; align-items:center; width:100%;">
+        <p>このQRを相手に見せてください</p>
+        <div id="qr-display"></div>
+        <div style="margin-bottom:20px;">ID: <span id="host-id-text" style="font-weight:bold; color:var(--p1-color);">生成中...</span></div>
+        <div style="color:var(--p2-color); font-weight:bold;" class="blink">相手の接続待ち...</div>
+        <button class="btn" onclick="location.reload()" style="margin-top:20px;">キャンセル</button>
     </div>
 
-    <div id="status-display">READY</div>
-
-    <div id="game-board"></div>
-
-    <div class="btn-group">
-        <button id="btn-rematch" class="btn" style="display:none;" onclick="Game.requestRematch()">再戦する</button>
-        <button id="btn-quit" class="btn btn-back" style="display:none;" onclick="Game.quit()">終了</button>
+    <div id="net-guest" style="display:none; flex-direction:column; align-items:center; width:100%;">
+        <div id="camera-wrapper"></div>
+        <button class="btn btn-primary" onclick="Network.startCamera()">📷 QRを読み取る</button>
+        <div style="margin:10px; color:#aaa;">または</div>
+        <input type="text" id="input-id" class="input-box" placeholder="招待コードを入力">
+        <button class="btn btn-accent" onclick="Network.joinByInput()">コードで参加</button>
+        <button class="btn" onclick="location.reload()" style="margin-top:20px;">もどる</button>
     </div>
 </div>
 
+<!-- 3. ゲーム画面 -->
+<div id="screen-game" class="screen">
+    <div class="game-container">
+        
+        <!-- ヘッダー情報 -->
+        <div class="hud">
+            <!-- 相手 -->
+            <div class="player-info p2-style">
+                <div class="player-name"><span>あいて</span> <span id="hp-text-p2">HP:3</span></div>
+                <div class="hp-bar-bg"><div id="hp-bar-p2" class="hp-bar"></div></div>
+            </div>
+            <!-- 自分 -->
+            <div class="player-info p1-style">
+                <div class="player-name"><span>あなた</span> <span id="hp-text-p1">HP:3</span></div>
+                <div class="hp-bar-bg"><div id="hp-bar-p1" class="hp-bar"></div></div>
+            </div>
+        </div>
+
+        <div id="status-msg" class="status-msg">あなたの番です</div>
+
+        <!-- 盤面 -->
+        <div class="board" id="board"></div>
+
+        <button class="btn" onclick="Game.toTitle()" style="margin-top:20px; align-self:center; background:#444; color:#fff;">降参して戻る</button>
+    </div>
+    
+    <!-- 操作ブロック -->
+    <div id="blocker"></div>
+</div>
+
+<!-- 結果モーダル -->
+<div id="modal-result" class="modal">
+    <h2 id="result-title">YOU WIN!</h2>
+    <div id="result-desc" style="margin-bottom:30px; font-size:1.2rem;">相手の体力が尽きました</div>
+    <button class="btn btn-primary" onclick="location.reload()">タイトルへ</button>
+</div>
+
+<style>
+.blink { animation: blink 1s infinite alternate; }
+@keyframes blink { 0% { opacity: 0.5; } 100% { opacity: 1; } }
+</style>
+
 <script>
-// --- Audio Manager ---
-const AudioSys = {
+/**
+ * LINE VANISH - COMPLETE EDITION
+ * 日本語化・QR対応・視覚ガイド強化
+ */
+
+// 音声機能
+const Sound = {
     ctx: null,
-    init() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); if(this.ctx.state === 'suspended') this.ctx.resume(); },
+    init() { if(!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)(); },
     play(type) {
         if(!this.ctx) return;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
         const t = this.ctx.currentTime;
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.connect(g); g.connect(this.ctx.destination);
         
-        if (type === 'click') {
-            osc.frequency.setValueAtTime(1000, t);
-            gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
-            osc.start(); osc.stop(t + 0.1);
-        } else if (type === 'place') {
-            osc.type = 'triangle';
-            osc.frequency.setValueAtTime(400, t);
-            osc.frequency.linearRampToValueAtTime(800, t + 0.1);
-            gain.gain.setValueAtTime(0.1, t);
-            gain.gain.linearRampToValueAtTime(0, t + 0.2);
-            osc.start(); osc.stop(t + 0.2);
-        } else if (type === 'vanish') {
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(200, t);
-            osc.frequency.exponentialRampToValueAtTime(50, t + 0.4);
-            gain.gain.setValueAtTime(0.2, t);
-            gain.gain.linearRampToValueAtTime(0, t + 0.4);
-            osc.start(); osc.stop(t + 0.4);
-        } else if (type === 'damage') {
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(100, t);
-            osc.frequency.setValueAtTime(50, t + 0.1);
-            gain.gain.setValueAtTime(0.3, t);
-            gain.gain.linearRampToValueAtTime(0, t + 0.3);
-            osc.start(); osc.stop(t + 0.3);
-        } else if (type === 'win') {
-            osc.type = 'triangle';
-            [0, 0.15, 0.3].forEach((dt, i) => {
-                const o = this.ctx.createOscillator();
-                const g = this.ctx.createGain();
-                o.frequency.setValueAtTime(523 + (i*100), t+dt);
-                g.gain.setValueAtTime(0.1, t+dt);
-                g.gain.linearRampToValueAtTime(0, t+dt+0.4);
-                o.connect(g); g.connect(this.ctx.destination);
-                o.start(t+dt); o.stop(t+dt+0.4);
-            });
-            return;
+        if(type === 'place') {
+            o.frequency.setValueAtTime(400, t);
+            g.gain.exponentialRampToValueAtTime(0.01, t+0.1);
+            o.start(); o.stop(t+0.1);
+        } else if(type === 'vanish') {
+            o.type = 'sawtooth'; o.frequency.setValueAtTime(150, t);
+            g.gain.linearRampToValueAtTime(0, t+0.3);
+            o.start(); o.stop(t+0.3);
+        } else if(type === 'damage') {
+            o.type = 'square'; o.frequency.setValueAtTime(100, t);
+            o.frequency.linearRampToValueAtTime(50, t+0.2);
+            g.gain.exponentialRampToValueAtTime(0.01, t+0.3);
+            o.start(); o.stop(t+0.3);
+        } else if(type === 'win') {
+            o.type = 'triangle';
+            o.frequency.setValueAtTime(523, t); o.frequency.setValueAtTime(1046, t+0.2);
+            g.gain.linearRampToValueAtTime(0, t+0.5);
+            o.start(); o.stop(t+0.5);
         }
-        osc.connect(gain); gain.connect(this.ctx.destination);
     }
 };
 
-// --- Game Logic ---
-const Game = {
-    // State
-    mode: 'local', // 'local' or 'online'
-    role: null,    // 'X', 'O', or null (local)
-    isHost: false,
-    peer: null, conn: null, scanner: null,
+// ネットワーク機能
+const Network = {
+    peer: null, conn: null, isHost: false, scanner: null,
     
-    board: Array(9).fill(""),
-    turn: 'X',
-    moves: { 'X': [], 'O': [] },
-    hp: { 'X': 3, 'O': 3 },
-    isPlaying: false,
-    
-    timer: 15, timerId: null,
-    rematchState: { me: false, opp: false },
-
-    // Init Methods
-    initLocal() {
-        AudioSys.init();
-        this.mode = 'local';
-        this.role = null;
-        this.startGame();
-    },
-
     initHost() {
-        AudioSys.init();
-        this.showScreen('host-screen');
+        Sound.init();
+        document.getElementById('net-select').style.display='none';
+        document.getElementById('net-host').style.display='flex';
         this.peer = new Peer();
         this.peer.on('open', id => {
             document.getElementById('host-id-text').innerText = id;
             this.isHost = true;
-            this.role = 'X'; // Host is X
-            
-            // QR Code Gen
-            const qrContainer = document.getElementById('qrcode-display');
-            qrContainer.innerHTML = "";
-            new QRCode(qrContainer, { text: id, width: 128, height: 128 });
+            document.getElementById('qr-display').innerHTML = "";
+            new QRCode(document.getElementById("qr-display"), { text: id, width: 160, height: 160 });
         });
         this.peer.on('connection', c => {
             this.conn = c;
             this.setupConn();
+            Game.startOnline(true);
         });
     },
-
-    toggleScanner() {
-        const box = document.getElementById('qr-reader');
-        if(box.style.display === 'block') {
-            if(this.scanner) this.scanner.clear();
-            box.style.display = 'none';
-        } else {
-            box.style.display = 'block';
-            this.scanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: 200 });
-            this.scanner.render((decoded) => {
-                document.getElementById('join-id').value = decoded;
-                AudioSys.play('click');
-                this.scanner.clear();
-                box.style.display = 'none';
-                this.joinRoom();
-            });
-        }
+    
+    showGuest() {
+        document.getElementById('net-select').style.display='none';
+        document.getElementById('net-guest').style.display='flex';
     },
-
-    joinRoom() {
-        const id = document.getElementById('join-id').value;
-        if(!id) return alert("IDを入力");
-        AudioSys.init();
-        if(this.scanner) this.scanner.clear();
-        this.showScreen('loading-screen');
-        
+    
+    startCamera() {
+        Sound.init();
+        const wrap = document.getElementById('camera-wrapper');
+        wrap.style.display = 'block';
+        this.scanner = new Html5QrcodeScanner("camera-wrapper", { fps: 10, qrbox: 200 });
+        this.scanner.render((decoded) => {
+            this.join(decoded);
+            this.scanner.clear();
+            wrap.style.display = 'none';
+        });
+    },
+    
+    joinByInput() {
+        const id = document.getElementById('input-id').value;
+        if(id) this.join(id);
+    },
+    
+    join(id) {
+        Sound.init();
         this.peer = new Peer();
         this.peer.on('open', () => {
             this.conn = this.peer.connect(id);
             this.isHost = false;
-            this.role = 'O'; // Guest is O
             this.setupConn();
+            Game.startOnline(false);
         });
-        this.peer.on('error', () => { alert("接続失敗"); location.reload(); });
+        this.peer.on('error', () => alert("接続できませんでした"));
     },
-
+    
     setupConn() {
-        this.conn.on('open', () => {
-            if(!this.isHost) this.mode = 'online';
-            else this.mode = 'online';
-            this.startGame();
-        });
-        this.conn.on('data', d => this.handleData(d));
-        this.conn.on('close', () => { alert("切断されました"); location.reload(); });
+        this.conn.on('data', d => Game.onData(d));
+        this.conn.on('close', () => { alert("通信切断"); location.reload(); });
+        this.conn.on('open', () => console.log("Connected"));
     },
+    
+    send(d) { if(this.conn && this.conn.open) this.conn.send(d); }
+};
 
-    send(type, payload) {
-        if(this.conn && this.conn.open) this.conn.send({type, payload});
+// ゲーム本体
+const Game = {
+    mode: 'local', // local, online
+    role: 'p1', // p1(host/self), p2(guest) - p1 is always Blue/X
+    turn: 'p1', // p1 or p2
+    
+    board: Array(9).fill(null),
+    moves: { p1: [], p2: [] }, // 履歴管理 (FIFO用)
+    hp: { p1: 3, p2: 3 },
+    
+    initLocal() {
+        Sound.init();
+        this.mode = 'local';
+        this.role = 'p1';
+        this.startGame();
     },
-
-    showScreen(id) {
-        document.querySelectorAll('.menu-content').forEach(e => e.style.display = 'none');
-        document.getElementById(id).style.display = 'flex';
+    
+    startOnline(isHost) {
+        this.mode = 'online';
+        this.role = isHost ? 'p1' : 'p2';
+        this.startGame();
     },
-
-    // Game Flow
+    
     startGame() {
-        document.getElementById('menu-overlay').style.display = 'none';
-        this.resetState();
-        this.renderBoard();
-        this.updateUI();
-        this.startTurn();
-    },
-
-    resetState() {
-        this.board.fill("");
-        this.moves = { 'X': [], 'O': [] };
-        this.hp = { 'X': 3, 'O': 3 };
-        this.turn = 'X';
-        this.isPlaying = true;
-        this.rematchState = { me: false, opp: false };
+        document.querySelectorAll('.screen').forEach(e => e.classList.remove('active'));
+        document.getElementById('screen-game').classList.add('active');
         
-        // UI Reset
-        document.getElementById('btn-rematch').style.display = 'none';
-        document.getElementById('btn-quit').style.display = 'none';
-        document.getElementById('btn-rematch').disabled = false;
-        document.getElementById('btn-rematch').innerText = "再戦する";
-        document.getElementById('game-board').classList.remove('blocked');
-        
-        // Indicators
-        if(this.mode === 'online') {
-            document.getElementById('you-x').style.display = (this.role === 'X') ? 'inline' : 'none';
-            document.getElementById('you-o').style.display = (this.role === 'O') ? 'inline' : 'none';
-            document.getElementById('btn-quit').style.display = 'inline-block';
-        }
-    },
-
-    startTurn() {
-        if(!this.isPlaying) return;
-        
-        this.startTimer();
-        this.updateUI();
-        
-        // Turn control
-        if(this.mode === 'online' && this.turn !== this.role) {
-            document.getElementById('game-board').classList.add('blocked');
-            this.setStatus("相手のターン...");
-        } else {
-            document.getElementById('game-board').classList.remove('blocked');
-            this.setStatus(this.mode === 'local' ? `PLAYER ${this.turn} のターン` : "あなたのターン");
-        }
-    },
-
-    clickCell(i) {
-        if(!this.isPlaying || this.board[i] !== "") return;
-        // Online check
-        if(this.mode === 'online' && this.turn !== this.role) return;
-
-        this.processMove(i);
-        if(this.mode === 'online') this.send('move', { index: i });
-    },
-
-    processMove(i) {
-        // FIFO Logic
-        if(this.moves[this.turn].length >= 3) {
-            const old = this.moves[this.turn].shift();
-            this.board[old] = "";
-            AudioSys.play('vanish');
-        }
-
-        this.board[i] = this.turn;
-        this.moves[this.turn].push(i);
-        AudioSys.play('place');
+        this.board.fill(null);
+        this.moves = { p1: [], p2: [] };
+        this.hp = { p1: 3, p2: 3 };
+        this.turn = 'p1';
         
         this.renderBoard();
-        this.checkWin();
+        this.updateHUD();
+        this.updateStatus();
     },
-
-    checkWin() {
-        const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-        let damage = 0;
+    
+    // 盤面描画
+    renderBoard() {
+        const boardEl = document.getElementById('board');
+        boardEl.innerHTML = '';
         
-        wins.forEach(line => {
-            if(line.every(idx => this.board[idx] === this.turn)) damage++;
-        });
-
-        if(damage > 0) {
-            this.applyDamage(damage);
-        } else {
-            this.switchTurn();
-        }
-    },
-
-    applyDamage(dmg) {
-        const opp = this.turn === 'X' ? 'O' : 'X';
-        this.hp[opp] -= dmg;
-        if(this.hp[opp] < 0) this.hp[opp] = 0;
-        AudioSys.play('damage');
-        this.updateUI();
-
-        if(this.hp[opp] === 0) {
-            this.endGame(this.turn);
-        } else {
-            this.setStatus(`クリティカル！ ${dmg} ダメージ！`);
-            // Block input briefly
-            document.getElementById('game-board').classList.add('blocked');
-            setTimeout(() => this.switchTurn(), 1000);
-        }
-    },
-
-    switchTurn() {
-        if(!this.isPlaying) return;
-        this.turn = this.turn === 'X' ? 'O' : 'X';
-        this.startTurn();
-    },
-
-    // Timer Logic
-    startTimer() {
-        if(this.timerId) clearInterval(this.timerId);
-        this.timer = 15;
-        const el = document.getElementById('timer');
-        el.innerText = this.timer;
-        el.classList.remove('warning');
-
-        this.timerId = setInterval(() => {
-            this.timer--;
-            el.innerText = this.timer;
-            if(this.timer <= 5) el.classList.add('warning');
+        this.board.forEach((cell, i) => {
+            const el = document.createElement('div');
+            el.className = 'cell';
             
-            if(this.timer <= 0) {
-                clearInterval(this.timerId);
-                // Time out logic
-                if(this.mode === 'local') {
-                    this.endGame(this.turn === 'X' ? 'O' : 'X');
-                } else {
-                    // Only current player sends timeout to avoid sync issues
-                    if(this.turn === this.role) {
-                        this.send('timeout', {});
-                        this.endGame(this.turn === 'X' ? 'O' : 'X');
-                    }
+            if(cell) {
+                el.innerText = (cell === 'p1') ? '×' : '○'; // P1:X(青), P2:O(赤)
+                el.className += (cell === 'p1') ? ' mark-x' : ' mark-o';
+                el.classList.add('marked');
+            }
+            
+            // 消滅予告: 次の手番プレイヤーが既に3つ置いている場合、一番古いコマを光らせる
+            const nextMover = this.turn;
+            if(this.moves[nextMover].length >= 3) {
+                const vanishingIdx = this.moves[nextMover][0];
+                if(i === vanishingIdx) {
+                    el.classList.add('fading');
                 }
             }
-        }, 1000);
+            
+            el.onclick = () => this.onClick(i);
+            boardEl.appendChild(el);
+        });
     },
-
-    endGame(winner) {
-        this.isPlaying = false;
-        clearInterval(this.timerId);
-        document.getElementById('game-board').classList.add('blocked');
-        this.setStatus(winner === this.role ? "YOU WIN!" : `PLAYER ${winner} WINS!`);
-        if(this.mode === 'local') this.setStatus(`PLAYER ${winner} WINS!`);
+    
+    onClick(i) {
+        // 自分のターンかチェック
+        if(this.mode === 'online' && this.turn !== this.role) return;
+        // 空きマスかチェック
+        if(this.board[i] !== null) return;
         
-        AudioSys.play('win');
-        document.getElementById('btn-rematch').style.display = 'inline-block';
-        if(this.mode === 'local') document.getElementById('btn-quit').style.display = 'inline-block';
-    },
-
-    // Rematch Logic
-    requestRematch() {
-        if(this.mode === 'local') {
-            this.resetState();
-            this.startGame();
-            return;
-        }
+        // 処理実行
+        this.processMove(i);
         
-        this.rematchState.me = true;
-        document.getElementById('btn-rematch').disabled = true;
-        document.getElementById('btn-rematch').innerText = "承認待ち...";
-        this.send('rematch_req', {});
-        this.checkRematchStart();
-    },
-
-    checkRematchStart() {
-        if(this.rematchState.me && this.rematchState.opp) {
-            this.setStatus("再戦開始！");
-            setTimeout(() => {
-                this.resetState();
-                this.startGame();
-            }, 500);
-        } else if (this.rematchState.me) {
-            this.setStatus("相手の応答を待っています...");
+        // オンラインなら送信
+        if(this.mode === 'online') {
+            Network.send({ type: 'move', index: i });
         }
     },
-
-    quit() {
-        location.reload();
+    
+    processMove(i) {
+        const player = this.turn;
+        
+        // 3つ以上ある場合、一番古いものを消す
+        if(this.moves[player].length >= 3) {
+            const oldIdx = this.moves[player].shift();
+            this.board[oldIdx] = null;
+            Sound.play('vanish');
+        }
+        
+        // 新しいコマを置く
+        this.board[i] = player;
+        this.moves[player].push(i);
+        Sound.play('place');
+        
+        this.renderBoard();
+        
+        // 勝利判定 (ライン成立チェック)
+        if(this.checkLine(player)) {
+            setTimeout(() => this.applyDamage(player), 500);
+        } else {
+            // ターン交代
+            this.turn = (this.turn === 'p1') ? 'p2' : 'p1';
+            this.updateStatus();
+            this.renderBoard(); // 予告更新のため再描画
+        }
     },
-
-    // Network Handler
-    handleData(d) {
-        if(d.type === 'move') {
-            this.processMove(d.payload.index);
-        } else if(d.type === 'timeout') {
-            this.endGame(this.turn === 'X' ? 'O' : 'X');
-        } else if(d.type === 'rematch_req') {
-            this.rematchState.opp = true;
-            if(this.rematchState.me) {
-                this.checkRematchStart();
+    
+    checkLine(player) {
+        const lines = [
+            [0,1,2],[3,4,5],[6,7,8], // 横
+            [0,3,6],[1,4,7],[2,5,8], // 縦
+            [0,4,8],[2,4,6]          // 斜め
+        ];
+        return lines.some(l => l.every(idx => this.board[idx] === player));
+    },
+    
+    applyDamage(attacker) {
+        const defender = (attacker === 'p1') ? 'p2' : 'p1';
+        this.hp[defender]--;
+        Sound.play('damage');
+        this.updateHUD();
+        
+        const msg = (this.mode==='local' || this.role===attacker) ? 
+            "攻撃成功！ 相手にダメージ！" : "攻撃された！ ダメージ！";
+        this.setMessage(msg);
+        
+        // ダメージ演出として盤面ロック
+        document.getElementById('blocker').style.display = 'block';
+        
+        setTimeout(() => {
+            if(this.hp[defender] <= 0) {
+                this.gameOver(attacker);
             } else {
-                this.setStatus("相手が再戦を希望しています");
-                // ボタンを目立たせる等の処理も可能
+                // 攻撃成功後は盤面リセットして、攻撃した側(attacker)のターンから再開
+                // (あるいはルールによっては交代だが、揃えたボーナスとして継続もアリ。
+                //  ここではシンプルに「盤面クリアして交代」にします)
+                this.board.fill(null);
+                this.moves = { p1: [], p2: [] };
+                this.turn = defender; // 攻撃された側から再開
+                
+                this.renderBoard();
+                this.updateStatus();
+                document.getElementById('blocker').style.display = 'none';
+            }
+        }, 1500);
+    },
+    
+    updateHUD() {
+        const p1Pct = (this.hp.p1 / 3) * 100;
+        const p2Pct = (this.hp.p2 / 3) * 100;
+        
+        document.getElementById('hp-bar-p1').style.width = p1Pct + '%';
+        document.getElementById('hp-text-p1').innerText = 'HP:' + this.hp.p1;
+        
+        document.getElementById('hp-bar-p2').style.width = p2Pct + '%';
+        document.getElementById('hp-text-p2').innerText = 'HP:' + this.hp.p2;
+    },
+    
+    updateStatus() {
+        let msg = "";
+        if(this.mode === 'local') {
+            msg = (this.turn === 'p1') ? "あなた(青) の番です" : "あいて(赤) の番です";
+        } else {
+            if(this.turn === this.role) {
+                msg = "あなたの番です";
+                document.getElementById('blocker').style.display = 'none';
+            } else {
+                msg = "あいての番です";
+                document.getElementById('blocker').style.display = 'block';
+            }
+        }
+        this.setMessage(msg);
+    },
+    
+    setMessage(txt) {
+        document.getElementById('status-msg').innerText = txt;
+    },
+    
+    gameOver(winner) {
+        Sound.play('win');
+        const modal = document.getElementById('modal-result');
+        const title = document.getElementById('result-title');
+        const desc = document.getElementById('result-desc');
+        modal.style.display = 'flex';
+        
+        if(this.mode === 'local') {
+            title.innerText = (winner === 'p1') ? "青の勝ち！" : "赤の勝ち！";
+            title.className = (winner === 'p1') ? "win" : "lose";
+        } else {
+            if(winner === this.role) {
+                title.innerText = "あなたの勝ち！";
+                title.className = "win";
+            } else {
+                title.innerText = "あなたの負け...";
+                title.className = "lose";
             }
         }
     },
-
-    // Render / UI
-    renderBoard() {
-        const boardEl = document.getElementById('game-board');
-        boardEl.innerHTML = "";
-        
-        // Find fading cells (next to vanish)
-        let fadingIdx = -1;
-        if(this.moves[this.turn].length >= 3) {
-            fadingIdx = this.moves[this.turn][0];
-        }
-
-        this.board.forEach((val, i) => {
-            const cell = document.createElement('div');
-            cell.className = `cell ${val ? val.toLowerCase() + ' taken' : ''}`;
-            cell.innerText = val;
-            
-            // Fading visual only for current player's next vanish
-            // But visually it's helpful to see fading for both
-            const xFade = (this.moves['X'].length >= 3 && this.moves['X'][0] === i);
-            const oFade = (this.moves['O'].length >= 3 && this.moves['O'][0] === i);
-            if(xFade || oFade) cell.classList.add('fading');
-
-            cell.onclick = () => this.clickCell(i);
-            boardEl.appendChild(cell);
-        });
+    
+    toTitle() {
+        if(Network.peer) { Network.peer.destroy(); Network.peer = null; }
+        location.reload();
     },
-
-    updateUI() {
-        const pX = document.getElementById('p-x');
-        const pO = document.getElementById('p-o');
-        
-        if(this.turn === 'X') {
-            pX.classList.add('active-x'); pX.classList.remove('inactive');
-            pO.classList.remove('active-o'); pO.classList.add('inactive');
-        } else {
-            pX.classList.remove('active-x'); pX.classList.add('inactive');
-            pO.classList.add('active-o'); pO.classList.remove('inactive');
+    
+    onData(d) {
+        if(d.type === 'move') {
+            this.processMove(d.index);
         }
-
-        document.getElementById('hp-x-bar').style.width = (this.hp['X'] / 3 * 100) + "%";
-        document.getElementById('hp-o-bar').style.width = (this.hp['O'] / 3 * 100) + "%";
-    },
-
-    setStatus(msg) {
-        document.getElementById('status-display').innerText = msg;
     }
 };
 </script>
