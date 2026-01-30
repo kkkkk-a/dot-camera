@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ラインヴァニッシュ</title>
+    <title>ラインヴァニッシュ (修正完了版)</title>
     
-    <!-- 必要なライブラリ -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;800&display=swap" rel="stylesheet">
 
 <style>
 :root {
@@ -84,7 +83,7 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
     margin-bottom: 20px; min-height: 1.5em;
 }
 
-/* 盤面 (3x3) */
+/* 盤面 (3x3) - レイアウト崩れ修正版 */
 .board {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
     width: 100%; aspect-ratio: 1; margin: 0 auto;
@@ -94,9 +93,13 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
 .cell {
     background: var(--cell-bg); border-radius: 10px;
     display: flex; justify-content: center; align-items: center;
-    font-size: 4rem; font-weight: 900; cursor: pointer;
+    /* 文字サイズを画面幅に応じて可変にし、最大値を制限して崩れ防止 */
+    font-size: clamp(2rem, 15vw, 4rem); 
+    font-weight: 900; cursor: pointer;
     transition: 0.2s; position: relative;
     box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
+    overflow: hidden; /* はみ出し防止 */
+    line-height: 1; /* 高さズレ防止 */
 }
 .cell:active { transform: scale(0.95); }
 .cell.marked { cursor: default; }
@@ -111,8 +114,8 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
     animation: pulse 1s infinite alternate;
 }
 .cell.fading::after {
-    content: "消える!"; position: absolute; font-size: 0.8rem;
-    bottom: 5px; color: #ffcc00; font-weight: bold;
+    content: "!"; position: absolute; font-size: 1rem;
+    top: 5px; right: 5px; color: #ffcc00; font-weight: bold;
 }
 @keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }
 
@@ -132,6 +135,8 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
     background: transparent; z-index: 5; display: none;
 }
 
+.blink { animation: blink 1s infinite alternate; }
+@keyframes blink { 0% { opacity: 0.5; } 100% { opacity: 1; } }
 </style>
 </head>
 <body>
@@ -143,7 +148,7 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
     
     <button class="btn btn-primary" onclick="Game.initLocal()">ひとりで遊ぶ (練習)</button>
     <button class="btn btn-accent" onclick="Network.openMenu()">ふたりで対戦 (通信)</button>
-    <div style="margin-top:20px; font-size:0.8rem; color:#666;">修正版 v1.1</div>
+    <div style="margin-top:20px; font-size:0.8rem; color:#666;">修正版 v1.2</div>
 </div>
 
 <!-- 2. ネットワークメニュー -->
@@ -198,7 +203,7 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
         <!-- 盤面 -->
         <div class="board" id="board"></div>
 
-        <button class="btn" onclick="Game.toTitle()" style="margin-top:20px; align-self:center; background:#444; color:#fff;">降参して戻る</button>
+        <button class="btn" onclick="Game.toTitle()" style="margin-top:20px; align-self:center; background:#444; color:#fff; font-size:1rem; padding:10px;">降参して戻る</button>
     </div>
     
     <!-- 操作ブロック -->
@@ -212,15 +217,12 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
     <button class="btn btn-primary" onclick="location.reload()">タイトルへ</button>
 </div>
 
-<style>
-.blink { animation: blink 1s infinite alternate; }
-@keyframes blink { 0% { opacity: 0.5; } 100% { opacity: 1; } }
-</style>
-
 <script>
 /**
- * LINE VANISH - COMPLETE EDITION (FIXED)
- * 修正: Network.openMenuの実装漏れ解消
+ * LINE VANISH - FIXED VERSION
+ * 修正1: 盤面全リセットではなく、揃ったラインのみ消去
+ * 修正2: CSSによるレイアウト崩れ防止 (clamp, overflow)
+ * 修正3: Network.openMenuの実装
  */
 
 // 音声機能
@@ -256,11 +258,11 @@ const Sound = {
     }
 };
 
-// ネットワーク機能 (修正版)
+// ネットワーク機能
 const Network = {
     peer: null, conn: null, isHost: false, scanner: null,
     
-    // 【修正】メニューを開く機能を追加
+    // メニューを開く処理
     openMenu() {
         document.querySelectorAll('.screen').forEach(e => e.classList.remove('active'));
         document.getElementById('screen-network').classList.add('active');
@@ -276,7 +278,6 @@ const Network = {
         this.peer = new Peer();
         this.peer.on('open', id => {
             document.getElementById('host-id-text').innerText = id;
-            this.isHost = true;
             document.getElementById('qr-display').innerHTML = "";
             new QRCode(document.getElementById("qr-display"), { text: id, width: 160, height: 160 });
         });
@@ -333,7 +334,7 @@ const Network = {
 // ゲーム本体
 const Game = {
     mode: 'local', // local, online
-    role: 'p1', // p1(host/self), p2(guest) - p1 is always Blue/X
+    role: 'p1', // p1(host/self), p2(guest)
     turn: 'p1', // p1 or p2
     
     board: Array(9).fill(null),
@@ -429,8 +430,9 @@ const Game = {
         this.renderBoard();
         
         // 勝利判定 (ライン成立チェック)
-        if(this.checkLine(player)) {
-            setTimeout(() => this.applyDamage(player), 500);
+        const winningLine = this.getWinningLine(player);
+        if(winningLine) {
+            setTimeout(() => this.applyDamage(player, winningLine), 500);
         } else {
             // ターン交代
             this.turn = (this.turn === 'p1') ? 'p2' : 'p1';
@@ -439,23 +441,24 @@ const Game = {
         }
     },
     
-    checkLine(player) {
+    getWinningLine(player) {
         const lines = [
             [0,1,2],[3,4,5],[6,7,8], // 横
             [0,3,6],[1,4,7],[2,5,8], // 縦
             [0,4,8],[2,4,6]          // 斜め
         ];
-        return lines.some(l => l.every(idx => this.board[idx] === player));
+        return lines.find(l => l.every(idx => this.board[idx] === player));
     },
     
-    applyDamage(attacker) {
+    // ダメージ処理 & 部分消去
+    applyDamage(attacker, winningLine) {
         const defender = (attacker === 'p1') ? 'p2' : 'p1';
         this.hp[defender]--;
         Sound.play('damage');
         this.updateHUD();
         
         const msg = (this.mode==='local' || this.role===attacker) ? 
-            "攻撃成功！ 相手にダメージ！" : "攻撃された！ ダメージ！";
+            "攻撃成功！ ライン消滅！" : "攻撃された！ ダメージ！";
         this.setMessage(msg);
         
         // ダメージ演出として盤面ロック
@@ -465,10 +468,20 @@ const Game = {
             if(this.hp[defender] <= 0) {
                 this.gameOver(attacker);
             } else {
-                // 盤面クリアして交代
-                this.board.fill(null);
-                this.moves = { p1: [], p2: [] };
-                this.turn = defender; // 攻撃された側から再開
+                // 【重要】勝負ありのラインだけを消す
+                winningLine.forEach(idx => {
+                    this.board[idx] = null;
+                    // 履歴(moves)からも削除する必要がある
+                    // moves配列の中に idx があれば除去する
+                    const moveIdx = this.moves[attacker].indexOf(idx);
+                    if(moveIdx !== -1) {
+                        this.moves[attacker].splice(moveIdx, 1);
+                    }
+                });
+                
+                // 攻撃成功後は、攻撃した側のターン継続？それとも交代？
+                // 通常は交代したほうがバランスが良い
+                this.turn = defender;
                 
                 this.renderBoard();
                 this.updateStatus();
