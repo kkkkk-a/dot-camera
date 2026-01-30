@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ラインヴァニッシュ (修正完了版)</title>
+    <title>ラインヴァニッシュ (最終修正版)</title>
     
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -27,15 +27,13 @@ body {
     display: flex; justify-content: center; align-items: center; user-select: none;
 }
 
-/* 画面管理 */
 .screen {
     position: absolute; width: 100%; height: 100%;
     display: none; flex-direction: column; align-items: center; justify-content: center;
-    background: var(--bg-color); z-index: 1; transition: opacity 0.3s;
+    background: var(--bg-color); z-index: 1;
 }
 .screen.active { display: flex; z-index: 10; }
 
-/* 共通UI */
 h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 4px 0 rgba(0,0,0,0.3); }
 .btn {
     width: 80%; max-width: 320px; padding: 18px; margin: 10px;
@@ -53,18 +51,15 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
     border: none; border-radius: 8px; margin: 10px 0; background: #fff; color: #333;
 }
 
-/* ネットワーク画面 */
 #qr-display { background: #fff; padding: 15px; border-radius: 10px; margin: 20px; }
 #camera-wrapper { width: 90%; max-width: 300px; margin: 10px; border: 4px solid #fff; border-radius: 8px; overflow: hidden; display: none; }
 
-/* ゲーム画面レイアウト */
 .game-container {
     width: 100%; max-width: 500px; height: 100%;
     display: flex; flex-direction: column; justify-content: space-between;
     padding: 20px; box-sizing: border-box;
 }
 
-/* プレイヤー情報 (HPバー) */
 .hud { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 10px; }
 .player-info { width: 45%; display: flex; flex-direction: column; gap: 5px; }
 .player-name { font-size: 0.9rem; font-weight: bold; display: flex; justify-content: space-between; }
@@ -76,50 +71,51 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
 .p2-style .hp-bar { background: var(--p2-color); }
 .p2-style .player-name { color: var(--p2-color); }
 
-/* メッセージエリア */
 .status-msg {
     font-size: 1.2rem; font-weight: bold; text-align: center;
     background: rgba(0,0,0,0.3); padding: 10px; border-radius: 10px;
     margin-bottom: 20px; min-height: 1.5em;
 }
 
-/* 盤面 (3x3) - レイアウト崩れ修正版 */
+/* --- 盤面レイアウト修正 --- */
 .board {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr); /* 高さも均等に強制 */
+    gap: 10px;
     width: 100%; aspect-ratio: 1; margin: 0 auto;
     background: var(--grid-bg); padding: 10px; border-radius: 15px;
     box-shadow: 0 10px 20px rgba(0,0,0,0.5); box-sizing: border-box;
 }
+
 .cell {
     background: var(--cell-bg); border-radius: 10px;
     display: flex; justify-content: center; align-items: center;
-    /* 文字サイズを画面幅に応じて可変にし、最大値を制限して崩れ防止 */
-    font-size: clamp(2rem, 15vw, 4rem); 
-    font-weight: 900; cursor: pointer;
-    transition: 0.2s; position: relative;
+    cursor: pointer; position: relative;
     box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
     overflow: hidden; /* はみ出し防止 */
+}
+
+/* 文字サイズをセルの大きさに合わせて安全に調整 */
+.cell-content {
+    font-size: min(15vw, 60px); /* 画面幅の15% または 60px の小さい方 */
+    font-weight: 900;
     line-height: 1; /* 高さズレ防止 */
 }
+
 .cell:active { transform: scale(0.95); }
 .cell.marked { cursor: default; }
 
-/* コマのスタイル */
-.mark-x { color: var(--p1-color); text-shadow: 0 0 10px rgba(79, 172, 254, 0.5); } /* 青 */
-.mark-o { color: var(--p2-color); text-shadow: 0 0 10px rgba(255, 88, 88, 0.5); } /* 赤 */
+.mark-x { color: var(--p1-color); text-shadow: 0 0 10px rgba(79, 172, 254, 0.5); }
+.mark-o { color: var(--p2-color); text-shadow: 0 0 10px rgba(255, 88, 88, 0.5); }
 
-/* 消滅予告 (点滅) */
+/* 消滅予告（点滅） */
 .cell.fading {
     opacity: 0.5; border: 3px solid #ffcc00;
-    animation: pulse 1s infinite alternate;
-}
-.cell.fading::after {
-    content: "!"; position: absolute; font-size: 1rem;
-    top: 5px; right: 5px; color: #ffcc00; font-weight: bold;
+    animation: pulse 1s infinite alternate; box-sizing: border-box;
 }
 @keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }
 
-/* モーダル */
 .modal {
     position: absolute; top:0; left:0; width:100%; height:100%;
     background: rgba(0,0,0,0.9); z-index: 20;
@@ -129,7 +125,6 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
 .win { color: var(--p1-color); }
 .lose { color: var(--p2-color); }
 
-/* 操作ブロック用オーバーレイ */
 #blocker {
     position: absolute; top:0; left:0; width:100%; height:100%;
     background: transparent; z-index: 5; display: none;
@@ -141,20 +136,18 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
 </head>
 <body>
 
-<!-- 1. タイトル画面 -->
+<!-- タイトル画面 -->
 <div id="screen-title" class="screen active">
     <h1>ライン<br>ヴァニッシュ</h1>
     <div style="color:#aaa; margin-bottom:30px;">消える三目並べ</div>
-    
     <button class="btn btn-primary" onclick="Game.initLocal()">ひとりで遊ぶ (練習)</button>
     <button class="btn btn-accent" onclick="Network.openMenu()">ふたりで対戦 (通信)</button>
-    <div style="margin-top:20px; font-size:0.8rem; color:#666;">修正版 v1.2</div>
+    <div style="margin-top:20px; font-size:0.8rem; color:#666;">修正版 v2.0</div>
 </div>
 
-<!-- 2. ネットワークメニュー -->
+<!-- ネットワークメニュー -->
 <div id="screen-network" class="screen">
     <h2>通信対戦</h2>
-    
     <div id="net-select" style="width:100%; display:flex; flex-direction:column; align-items:center;">
         <button class="btn btn-primary" onclick="Network.initHost()">部屋をつくる (ホスト)</button>
         <div style="margin:10px;">または</div>
@@ -180,18 +173,15 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
     </div>
 </div>
 
-<!-- 3. ゲーム画面 -->
+<!-- ゲーム画面 -->
 <div id="screen-game" class="screen">
     <div class="game-container">
-        
         <!-- ヘッダー情報 -->
         <div class="hud">
-            <!-- 相手 -->
             <div class="player-info p2-style">
                 <div class="player-name"><span>あいて</span> <span id="hp-text-p2">HP:3</span></div>
                 <div class="hp-bar-bg"><div id="hp-bar-p2" class="hp-bar"></div></div>
             </div>
-            <!-- 自分 -->
             <div class="player-info p1-style">
                 <div class="player-name"><span>あなた</span> <span id="hp-text-p1">HP:3</span></div>
                 <div class="hp-bar-bg"><div id="hp-bar-p1" class="hp-bar"></div></div>
@@ -206,7 +196,6 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
         <button class="btn" onclick="Game.toTitle()" style="margin-top:20px; align-self:center; background:#444; color:#fff; font-size:1rem; padding:10px;">降参して戻る</button>
     </div>
     
-    <!-- 操作ブロック -->
     <div id="blocker"></div>
 </div>
 
@@ -219,13 +208,11 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
 
 <script>
 /**
- * LINE VANISH - FIXED VERSION
- * 修正1: 盤面全リセットではなく、揃ったラインのみ消去
- * 修正2: CSSによるレイアウト崩れ防止 (clamp, overflow)
- * 修正3: Network.openMenuの実装
+ * LINE VANISH - FINAL FIX
+ * 修正1: 線を消さずに盤面を残す（FIFOルールのみで循環）
+ * 修正2: 文字サイズ調整によるレイアウト崩れ防止
  */
 
-// 音声機能
 const Sound = {
     ctx: null,
     init() { if(!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)(); },
@@ -235,34 +222,21 @@ const Sound = {
         const o = this.ctx.createOscillator();
         const g = this.ctx.createGain();
         o.connect(g); g.connect(this.ctx.destination);
-        
         if(type === 'place') {
-            o.frequency.setValueAtTime(400, t);
-            g.gain.exponentialRampToValueAtTime(0.01, t+0.1);
-            o.start(); o.stop(t+0.1);
+            o.frequency.setValueAtTime(400, t); g.gain.exponentialRampToValueAtTime(0.01, t+0.1); o.start(); o.stop(t+0.1);
         } else if(type === 'vanish') {
-            o.type = 'sawtooth'; o.frequency.setValueAtTime(150, t);
-            g.gain.linearRampToValueAtTime(0, t+0.3);
-            o.start(); o.stop(t+0.3);
+            o.type = 'sawtooth'; o.frequency.setValueAtTime(150, t); g.gain.linearRampToValueAtTime(0, t+0.3); o.start(); o.stop(t+0.3);
         } else if(type === 'damage') {
-            o.type = 'square'; o.frequency.setValueAtTime(100, t);
-            o.frequency.linearRampToValueAtTime(50, t+0.2);
-            g.gain.exponentialRampToValueAtTime(0.01, t+0.3);
-            o.start(); o.stop(t+0.3);
+            o.type = 'square'; o.frequency.setValueAtTime(100, t); o.frequency.linearRampToValueAtTime(50, t+0.2); g.gain.exponentialRampToValueAtTime(0.01, t+0.3); o.start(); o.stop(t+0.3);
         } else if(type === 'win') {
-            o.type = 'triangle';
-            o.frequency.setValueAtTime(523, t); o.frequency.setValueAtTime(1046, t+0.2);
-            g.gain.linearRampToValueAtTime(0, t+0.5);
-            o.start(); o.stop(t+0.5);
+            o.type = 'triangle'; o.frequency.setValueAtTime(523, t); o.frequency.setValueAtTime(1046, t+0.2); g.gain.linearRampToValueAtTime(0, t+0.5); o.start(); o.stop(t+0.5);
         }
     }
 };
 
-// ネットワーク機能
 const Network = {
     peer: null, conn: null, isHost: false, scanner: null,
     
-    // メニューを開く処理
     openMenu() {
         document.querySelectorAll('.screen').forEach(e => e.classList.remove('active'));
         document.getElementById('screen-network').classList.add('active');
@@ -270,7 +244,6 @@ const Network = {
         document.getElementById('net-host').style.display='none';
         document.getElementById('net-guest').style.display='none';
     },
-
     initHost() {
         Sound.init();
         document.getElementById('net-select').style.display='none';
@@ -282,34 +255,26 @@ const Network = {
             new QRCode(document.getElementById("qr-display"), { text: id, width: 160, height: 160 });
         });
         this.peer.on('connection', c => {
-            this.conn = c;
-            this.setupConn();
-            Game.startOnline(true);
+            this.conn = c; this.setupConn(); Game.startOnline(true);
         });
     },
-    
     showGuest() {
         document.getElementById('net-select').style.display='none';
         document.getElementById('net-guest').style.display='flex';
     },
-    
     startCamera() {
         Sound.init();
         const wrap = document.getElementById('camera-wrapper');
         wrap.style.display = 'block';
         this.scanner = new Html5QrcodeScanner("camera-wrapper", { fps: 10, qrbox: 200 });
         this.scanner.render((decoded) => {
-            this.join(decoded);
-            this.scanner.clear();
-            wrap.style.display = 'none';
+            this.join(decoded); this.scanner.clear(); wrap.style.display = 'none';
         });
     },
-    
     joinByInput() {
         const id = document.getElementById('input-id').value;
         if(id) this.join(id);
     },
-    
     join(id) {
         Sound.init();
         this.peer = new Peer();
@@ -321,168 +286,107 @@ const Network = {
         });
         this.peer.on('error', () => alert("接続できませんでした"));
     },
-    
     setupConn() {
         this.conn.on('data', d => Game.onData(d));
         this.conn.on('close', () => { alert("通信切断"); location.reload(); });
         this.conn.on('open', () => console.log("Connected"));
     },
-    
     send(d) { if(this.conn && this.conn.open) this.conn.send(d); }
 };
 
-// ゲーム本体
 const Game = {
-    mode: 'local', // local, online
-    role: 'p1', // p1(host/self), p2(guest)
-    turn: 'p1', // p1 or p2
-    
+    mode: 'local', role: 'p1', turn: 'p1',
     board: Array(9).fill(null),
-    moves: { p1: [], p2: [] }, // 履歴管理 (FIFO用)
+    moves: { p1: [], p2: [] },
     hp: { p1: 3, p2: 3 },
     
-    initLocal() {
-        Sound.init();
-        this.mode = 'local';
-        this.role = 'p1';
-        this.startGame();
-    },
-    
-    startOnline(isHost) {
-        this.mode = 'online';
-        this.role = isHost ? 'p1' : 'p2';
-        this.startGame();
-    },
+    initLocal() { Sound.init(); this.mode = 'local'; this.role = 'p1'; this.startGame(); },
+    startOnline(isHost) { this.mode = 'online'; this.role = isHost ? 'p1' : 'p2'; this.startGame(); },
     
     startGame() {
         document.querySelectorAll('.screen').forEach(e => e.classList.remove('active'));
         document.getElementById('screen-game').classList.add('active');
-        
         this.board.fill(null);
         this.moves = { p1: [], p2: [] };
         this.hp = { p1: 3, p2: 3 };
         this.turn = 'p1';
-        
         this.renderBoard();
         this.updateHUD();
         this.updateStatus();
     },
     
-    // 盤面描画
     renderBoard() {
         const boardEl = document.getElementById('board');
         boardEl.innerHTML = '';
-        
         this.board.forEach((cell, i) => {
             const el = document.createElement('div');
             el.className = 'cell';
-            
             if(cell) {
-                el.innerText = (cell === 'p1') ? '×' : '○'; // P1:X(青), P2:O(赤)
-                el.className += (cell === 'p1') ? ' mark-x' : ' mark-o';
+                const mark = document.createElement('div');
+                mark.className = 'cell-content' + ((cell==='p1') ? ' mark-x' : ' mark-o');
+                mark.innerText = (cell==='p1') ? '×' : '○';
+                el.appendChild(mark);
                 el.classList.add('marked');
             }
-            
-            // 消滅予告: 次の手番プレイヤーが既に3つ置いている場合、一番古いコマを光らせる
             const nextMover = this.turn;
             if(this.moves[nextMover].length >= 3) {
                 const vanishingIdx = this.moves[nextMover][0];
-                if(i === vanishingIdx) {
-                    el.classList.add('fading');
-                }
+                if(i === vanishingIdx) el.classList.add('fading');
             }
-            
             el.onclick = () => this.onClick(i);
             boardEl.appendChild(el);
         });
     },
     
     onClick(i) {
-        // 自分のターンかチェック
         if(this.mode === 'online' && this.turn !== this.role) return;
-        // 空きマスかチェック
         if(this.board[i] !== null) return;
-        
-        // 処理実行
         this.processMove(i);
-        
-        // オンラインなら送信
-        if(this.mode === 'online') {
-            Network.send({ type: 'move', index: i });
-        }
+        if(this.mode === 'online') Network.send({ type: 'move', index: i });
     },
     
     processMove(i) {
         const player = this.turn;
-        
-        // 3つ以上ある場合、一番古いものを消す
         if(this.moves[player].length >= 3) {
             const oldIdx = this.moves[player].shift();
             this.board[oldIdx] = null;
             Sound.play('vanish');
         }
-        
-        // 新しいコマを置く
         this.board[i] = player;
         this.moves[player].push(i);
         Sound.play('place');
-        
         this.renderBoard();
         
-        // 勝利判定 (ライン成立チェック)
-        const winningLine = this.getWinningLine(player);
-        if(winningLine) {
-            setTimeout(() => this.applyDamage(player, winningLine), 500);
+        if(this.checkLine(player)) {
+            setTimeout(() => this.applyDamage(player), 500);
         } else {
-            // ターン交代
             this.turn = (this.turn === 'p1') ? 'p2' : 'p1';
             this.updateStatus();
-            this.renderBoard(); // 予告更新のため再描画
+            this.renderBoard();
         }
     },
     
-    getWinningLine(player) {
-        const lines = [
-            [0,1,2],[3,4,5],[6,7,8], // 横
-            [0,3,6],[1,4,7],[2,5,8], // 縦
-            [0,4,8],[2,4,6]          // 斜め
-        ];
-        return lines.find(l => l.every(idx => this.board[idx] === player));
+    checkLine(player) {
+        const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+        return lines.some(l => l.every(idx => this.board[idx] === player));
     },
     
-    // ダメージ処理 & 部分消去
-    applyDamage(attacker, winningLine) {
+    applyDamage(attacker) {
         const defender = (attacker === 'p1') ? 'p2' : 'p1';
         this.hp[defender]--;
         Sound.play('damage');
         this.updateHUD();
         
-        const msg = (this.mode==='local' || this.role===attacker) ? 
-            "攻撃成功！ ライン消滅！" : "攻撃された！ ダメージ！";
+        const msg = (this.mode==='local' || this.role===attacker) ? "攻撃成功！ 相手にダメージ！" : "攻撃された！ ダメージ！";
         this.setMessage(msg);
-        
-        // ダメージ演出として盤面ロック
         document.getElementById('blocker').style.display = 'block';
         
         setTimeout(() => {
             if(this.hp[defender] <= 0) {
                 this.gameOver(attacker);
             } else {
-                // 【重要】勝負ありのラインだけを消す
-                winningLine.forEach(idx => {
-                    this.board[idx] = null;
-                    // 履歴(moves)からも削除する必要がある
-                    // moves配列の中に idx があれば除去する
-                    const moveIdx = this.moves[attacker].indexOf(idx);
-                    if(moveIdx !== -1) {
-                        this.moves[attacker].splice(moveIdx, 1);
-                    }
-                });
-                
-                // 攻撃成功後は、攻撃した側のターン継続？それとも交代？
-                // 通常は交代したほうがバランスが良い
+                // 【修正箇所】盤面は消さずにターン交代
                 this.turn = defender;
-                
                 this.renderBoard();
                 this.updateStatus();
                 document.getElementById('blocker').style.display = 'none';
@@ -491,13 +395,9 @@ const Game = {
     },
     
     updateHUD() {
-        const p1Pct = (this.hp.p1 / 3) * 100;
-        const p2Pct = (this.hp.p2 / 3) * 100;
-        
-        document.getElementById('hp-bar-p1').style.width = p1Pct + '%';
+        document.getElementById('hp-bar-p1').style.width = (this.hp.p1/3)*100 + '%';
         document.getElementById('hp-text-p1').innerText = 'HP:' + this.hp.p1;
-        
-        document.getElementById('hp-bar-p2').style.width = p2Pct + '%';
+        document.getElementById('hp-bar-p2').style.width = (this.hp.p2/3)*100 + '%';
         document.getElementById('hp-text-p2').innerText = 'HP:' + this.hp.p2;
     },
     
@@ -517,15 +417,12 @@ const Game = {
         this.setMessage(msg);
     },
     
-    setMessage(txt) {
-        document.getElementById('status-msg').innerText = txt;
-    },
+    setMessage(txt) { document.getElementById('status-msg').innerText = txt; },
     
     gameOver(winner) {
         Sound.play('win');
         const modal = document.getElementById('modal-result');
         const title = document.getElementById('result-title');
-        const desc = document.getElementById('result-desc');
         modal.style.display = 'flex';
         
         if(this.mode === 'local') {
@@ -548,9 +445,7 @@ const Game = {
     },
     
     onData(d) {
-        if(d.type === 'move') {
-            this.processMove(d.index);
-        }
+        if(d.type === 'move') this.processMove(d.index);
     }
 };
 </script>
