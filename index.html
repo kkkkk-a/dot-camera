@@ -160,6 +160,11 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
 
 .blink { animation: blink 1s infinite alternate; }
 @keyframes blink { 0% { opacity: 0.5; } 100% { opacity: 1; } }
+.timer-danger {
+    color: #ff0000 !important;
+    text-shadow: 0 0 10px rgba(255,0,0,0.5);
+    animation: blink 0.5s infinite alternate;
+}
 </style>
 </head>
 <body>
@@ -222,7 +227,9 @@ h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 
                 <div class="hp-bar-bg"><div id="hp-bar-p1" class="hp-bar"></div></div>
             </div>
         </div>
-
+<div id="game-timer" style="font-family:'Orbitron'; font-size:2rem; font-weight:bold; color:var(--accent-gold); text-align:center; margin-bottom:5px; display:none;">
+    15
+</div>
         <div id="status-msg" class="status-msg">あなたの番です</div>
 
         <!-- 盤面 -->
@@ -332,11 +339,57 @@ const Network = {
 };
 
 const Game = {
+        timer: 15,
+    timerId: null,
     mode: 'local', role: 'p1', turn: 'p1',
     board: Array(9).fill(null),
     moves: { p1: [], p2: [] },
     hp: { p1: 3, p2: 3 },
-    
+        startTimer(sec) {
+        this.stopTimer();
+        this.timer = sec;
+        const el = document.getElementById('game-timer');
+        el.style.display = 'block';
+        el.innerText = this.timer;
+        el.classList.remove('timer-danger');
+
+        this.timerId = setInterval(() => {
+            this.timer--;
+            el.innerText = this.timer;
+            if (this.timer <= 5) el.classList.add('timer-danger');
+            
+            if (this.timer <= 0) {
+                this.stopTimer();
+                this.autoMove(); // 時間切れ時に自動で置く
+            }
+        }, 1000);
+    },
+
+    // タイマー停止
+    stopTimer() {
+        if (this.timerId) clearInterval(this.timerId);
+        document.getElementById('game-timer').style.display = 'none';
+    },
+
+    // 時間切れ時の自動配置
+    autoMove() {
+        // 空いているマスをすべて探す
+        const emptyCells = [];
+        this.board.forEach((val, i) => {
+            if (val === null) emptyCells.push(i);
+        });
+        
+        if (emptyCells.length > 0) {
+            // ランダムに1つ選んで配置
+            const randomIdx = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+            // オンライン対戦時は、自分のターンのみ自動配置を実行して送信
+            if (this.mode === 'online') {
+                if (this.turn === this.role) this.onClick(randomIdx);
+            } else {
+                this.onClick(randomIdx);
+            }
+        }
+    },
     initLocal() { Sound.init(); this.mode = 'local'; this.role = 'p1'; this.startGame(); },
     startOnline(isHost) { this.mode = 'online'; this.role = isHost ? 'p1' : 'p2'; this.startGame(); },
     
@@ -384,6 +437,7 @@ const Game = {
     },
     
     processMove(i) {
+         this.stopTimer();
         const player = this.turn;
         // FIFOロジック
         if(this.moves[player].length >= 3) {
@@ -413,6 +467,7 @@ const Game = {
     },
     
     applyDamage(attacker, winLine) {
+         this.stopTimer();
         const defender = (attacker === 'p1') ? 'p2' : 'p1';
         this.hp[defender]--;
         Sound.play('damage');
@@ -464,6 +519,15 @@ const Game = {
             }
         }
         this.setMessage(msg);
+      if (this.mode === 'local') {
+            this.startTimer(15);
+        } else {
+            if (this.turn === this.role) {
+                this.startTimer(15);
+            } else {
+                this.stopTimer(); // 相手のターンは止める
+            }
+        }
     },
     
     setMessage(txt) { document.getElementById('status-msg').innerText = txt; },
