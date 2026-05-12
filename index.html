@@ -1,566 +1,2627 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ラインヴァニッシュ (FINAL)</title>
-    <link rel="icon" type="image/png" href="icon.png">
-    <!-- Libraries -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;800&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ドット絵カメラ</title>
+   <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/",
+                "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.js",
+                "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3.0.0/lib/three-vrm-animation.module.js"
+            }
+        }
+    </script>
+    <script type="module" defer>
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+        import { createVRMAnimationClip, VRMAnimationLoaderPlugin } from '@pixiv/three-vrm-animation';
+        import { FaceLandmarker, PoseLandmarker, HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 
-<style>
-:root {
-    --bg-color: #2b2b2b;
-    --text-color: #fff;
-    --p1-color: #4facfe; /* 青 (自分/P1) */
-    --p2-color: #ff5858; /* 赤 (相手/P2) */
-    --grid-bg: #3e3e3e;
-    --cell-bg: #4a4a4a;
-}
+        window.THREE = THREE;
+        window.GLTFLoader = GLTFLoader;
+        window.OrbitControls = OrbitControls;
+        window.VRMLoaderPlugin = VRMLoaderPlugin;
+        window.VRMUtils = VRMUtils;
+        window.createVRMAnimationClip = createVRMAnimationClip;
+        window.VRMAnimationLoaderPlugin = VRMAnimationLoaderPlugin;
 
-body {
-    margin: 0; background: var(--bg-color); color: var(--text-color);
-    font-family: 'M PLUS Rounded 1c', sans-serif;
-    height: 100vh; overflow: hidden; touch-action: manipulation;
-    display: flex; justify-content: center; align-items: center; user-select: none;
-}
+        window.FaceLandmarker = FaceLandmarker;
+        window.PoseLandmarker = PoseLandmarker;
+        window.HandLandmarker = HandLandmarker; // ★追加: 手の認識
+        window.FilesetResolver = FilesetResolver;
+    </script>
+    <!-- MP4出力用とMP3出力用のライブラリを追加 -->
+    <script src="https://unpkg.com/mp4-muxer/build/mp4-muxer.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js" defer></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: sans-serif;
+            background-color: #00ff00;
+            /* デフォルトはグリーンバック */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
 
-/* 画面管理 */
-.screen {
-    position: absolute; width: 100%; height: 100%;
-    display: none; flex-direction: column; align-items: center; justify-content: center;
-    background: var(--bg-color); z-index: 1; transition: opacity 0.3s;
-}
-.screen.active { display: flex; z-index: 10; }
+        /* キャラクター表示用キャンバス */
+        #main-canvas {
+            image-rendering: pixelated;
+            position: fixed;
+            /* ★中央固定から絶対配置に変更 */
+            z-index: 1;
+            transition: all 0.3s ease-out;
+            /* ★スライドを滑らかにする */
+            /* width, height は JS で制御するため削除または上書き */
+            pointer-events: auto;
+            /* キャラクター背後のクリックを邪魔しない */
+        }
 
-/* HUBボタン */
-.nav-return-btn {
-    display: inline-block;
-    padding: 8px 16px;
-    border-radius: 10px;
-    background: rgba(0, 210, 255, 0.15);
-    color: #00d2ff;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 0.85rem;
-    border: 1px solid rgba(0, 210, 255, 0.4);
-    position: absolute; top: 20px; left: 20px; z-index: 100;
-}
-.nav-return-btn:hover { background: rgba(0, 210, 255, 0.3); }
+        body.ui-hidden #main-canvas {
+            pointer-events: none;
+        }
 
-/* 共通UI */
-h1 { font-size: 2.5rem; margin-bottom: 10px; text-align: center; text-shadow: 0 4px 0 rgba(0,0,0,0.3); }
-.desc { color: #aaa; font-size: 0.9rem; margin-bottom: 30px; text-align: center; }
+        /* 操作パネル */
+        #ui-panel {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            width: 280px;
+            max-height: calc(100vh - 40px);
+            /* 画面の高さから上下の余白を引いたサイズに制限 */
+            overflow-y: auto;
+            /* 中身がはみ出したらスクロールバーを表示 */
+            scrollbar-width: thin;
+            /* スクロールバーを細くする(Firefox用) */
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+            user-select: none;
+            transition: opacity 0.3s;
+        }
 
-.btn {
-    width: 80%; max-width: 320px; padding: 18px; margin: 10px;
-    border: none; border-radius: 15px;
-    font-size: 1.2rem; font-weight: bold; cursor: pointer;
-    box-shadow: 0 5px 0 rgba(0,0,0,0.3); transition: transform 0.1s;
-    background: #fff; color: #333;
-}
-.btn:active { transform: translateY(5px); box-shadow: none; }
-.btn-primary { background: var(--p1-color); color: #fff; }
-.btn-accent { background: var(--p2-color); color: #fff; }
+        #ui-panel.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
 
-.input-box {
-    font-size: 1.2rem; padding: 12px; width: 70%; text-align: center;
-    border: none; border-radius: 8px; margin: 10px 0; background: #fff; color: #333;
-}
+        #ui-panel:hover {
+            opacity: 1;
+        }
 
-/* ネットワーク画面 */
-#qr-display { background: #fff; padding: 15px; border-radius: 10px; margin: 20px; }
-#camera-wrapper { width: 90%; max-width: 300px; margin: 10px; border: 4px solid #fff; border-radius: 8px; overflow: hidden; display: none; }
+        h2 {
+            margin: 0 0 10px 0;
+            font-size: 1rem;
+            color: #333;
+            border-bottom: 2px solid #28a745;
+        }
 
-/* ゲーム画面レイアウト */
-.game-container {
-    width: 100%; max-width: 500px; height: 100%;
-    display: flex; flex-direction: column; justify-content: space-between;
-    padding: 20px; box-sizing: border-box;
-}
+        .group {
+            margin-bottom: 12px;
+        }
 
-/* プレイヤー情報 (HPバー) */
-.hud { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 10px; }
-.player-info { width: 45%; display: flex; flex-direction: column; gap: 5px; }
-.player-name { font-size: 0.9rem; font-weight: bold; display: flex; justify-content: space-between; }
-.hp-bar-bg { width: 100%; height: 15px; background: #555; border-radius: 10px; overflow: hidden; border: 2px solid #666; }
-.hp-bar { height: 100%; width: 100%; transition: width 0.5s ease; }
+        label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: bold;
+            margin-bottom: 4px;
+            color: #555;
+        }
 
-.p1-style .hp-bar { background: var(--p1-color); }
-.p1-style .player-name { color: var(--p1-color); }
-.p2-style .hp-bar { background: var(--p2-color); }
-.p2-style .player-name { color: var(--p2-color); }
+        button {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-bottom: 5px;
+            transition: background 0.2s;
+        }
 
-/* メッセージエリア */
-.status-msg {
-    font-size: 1.2rem; font-weight: bold; text-align: center;
-    background: rgba(0,0,0,0.3); padding: 10px; border-radius: 10px;
-    margin-bottom: 20px; min-height: 1.5em;
-}
+        .btn-primary {
+            background: #28a745;
+            color: white;
+        }
 
-/* 盤面 (3x3) - レイアウト修正済み */
-.board {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    grid-template-rows: repeat(3, 1fr);
-    gap: 10px;
-    width: 100%; aspect-ratio: 1; margin: 0 auto;
-    background: var(--grid-bg); padding: 10px; border-radius: 15px;
-    box-shadow: 0 10px 20px rgba(0,0,0,0.5); box-sizing: border-box;
-}
+        .btn-primary:hover {
+            background: #218838;
+        }
 
-.cell {
-    background: var(--cell-bg); border-radius: 10px;
-    display: flex; justify-content: center; align-items: center;
-    cursor: pointer; position: relative;
-    box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
-    overflow: hidden; /* はみ出し防止 */
-}
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
 
-/* 文字サイズ自動調整 */
-.cell-mark {
-    font-size: clamp(2rem, 15vw, 4rem); 
-    font-weight: 900; line-height: 1;
-}
+        input[type="range"] {
+            width: 100%;
+            margin-bottom: 8px;
+        }
 
-.cell:active { transform: scale(0.95); }
-.cell.marked { cursor: default; }
+        .status {
+            font-size: 0.7rem;
+            color: #666;
+            text-align: center;
+        }
 
-.mark-x { color: var(--p1-color); text-shadow: 0 0 10px rgba(79, 172, 254, 0.5); }
-.mark-o { color: var(--p2-color); text-shadow: 0 0 10px rgba(255, 88, 88, 0.5); }
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
 
-/* 消滅予告（点滅） */
-.cell.fading {
-    opacity: 0.6; border: 3px solid #ffcc00;
-    animation: pulse 1s infinite alternate; box-sizing: border-box;
-}
-.cell.fading::after {
-    content: "!"; position: absolute; font-size: 1rem;
-    top: 2px; right: 5px; color: #ffcc00; font-weight: bold;
-}
-@keyframes pulse { from { opacity: 0.6; } to { opacity: 1; } }
+        #video-preview {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            width: 160px;
+            height: 120px;
+            border: 2px solid white;
+            border-radius: 4px;
+            background: #000;
+            transform: scaleX(-1);
+            /* ★追加：他の要素（背景やキャンバス）より必ず上に表示 */
+            z-index: 999;
+            /* ★追加：プレビュー自体がマウス操作の邪魔をしないようにする */
+            pointer-events: none;
+            /* 初期状態は非表示（カメラ起動で表示させる） */
+            display: none;
+        }
 
-/* モーダル */
-.modal {
-    position: absolute; top:0; left:0; width:100%; height:100%;
-    background: rgba(0,0,0,0.9); z-index: 20;
-    display: none; flex-direction: column; justify-content: center; align-items: center;
-}
-.modal h2 { font-size: 3rem; margin-bottom: 20px; }
-.win { color: var(--p1-color); }
-.lose { color: var(--p2-color); }
+        .flex-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 5px;
+        }
+        /* ★追加: ショート動画安全圏ガイド */
+        #safe-area-guide {
+            position: fixed;
+            pointer-events: none; /* マウス操作の邪魔をしない */
+            display: none; /* 初期は非表示 */
+            z-index: 50; /* キャンバスより上で、UIパネルより下 */
+            border: 4px dashed rgba(255, 255, 255, 0.7);
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+            box-sizing: border-box;
+        }
 
-#blocker {
-    position: absolute; top:0; left:0; width:100%; height:100%;
-    background: transparent; z-index: 5; display: none;
-}
+        /* TikTok等のUI（いいね、コメント）が被る右側エリア */
+        .guide-ui-right {
+            position: absolute;
+            right: 0;
+            bottom: 10%;
+            width: 70px;
+            height: 45%;
+            background: rgba(220, 53, 69, 0.3); /* 赤色半透明 */
+            border-left: 2px dashed #dc3545;
+        }
 
-.blink { animation: blink 1s infinite alternate; }
-@keyframes blink { 0% { opacity: 0.5; } 100% { opacity: 1; } }
-.timer-danger {
-    color: #ff0000 !important;
-    text-shadow: 0 0 10px rgba(255,0,0,0.5);
-    animation: blink 0.5s infinite alternate;
-}
-</style>
+        /* タイトルや説明文が被る下側エリア */
+        .guide-ui-bottom {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 18%;
+            background: rgba(220, 53, 69, 0.3);
+            border-top: 2px dashed #dc3545;
+        }
+
+        .guide-text {
+            position: absolute;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-shadow: 1px 1px 3px black, -1px -1px 3px black;
+        }
+    </style>
 </head>
+
 <body>
 
-<!-- 1. タイトル画面 -->
-<div id="screen-title" class="screen active">
-    <!-- HUBボタン -->
-    <a href="https://kkkkk-a.github.io/game-hub/" class="nav-return-btn" title="Game Hub">HUB</a>
-
-    <h1>ライン<br>ヴァニッシュ</h1>
-    <div class="desc">消える三目並べ＋体力バトル</div>
-    
-    <button class="btn btn-primary" onclick="Game.initLocal()">ひとりで遊ぶ (練習)</button>
-    <button class="btn btn-accent" onclick="Network.openMenu()">ふたりで対戦 (通信)</button>
-    <div style="margin-top:20px; font-size:0.8rem; color:#666;">FINAL FIX</div>
-</div>
-
-<!-- 2. ネットワークメニュー -->
-<div id="screen-network" class="screen">
-    <h2>通信対戦</h2>
-    <div id="net-select" style="width:100%; display:flex; flex-direction:column; align-items:center;">
-        <button class="btn btn-primary" onclick="Network.initHost()">部屋をつくる (HOST)</button>
-        <div style="margin:10px;">または</div>
-        <button class="btn btn-accent" onclick="Network.showGuest()">部屋に入る (GUEST)</button>
-        <button class="btn" onclick="location.reload()" style="margin-top:20px;">もどる</button>
+    <!-- キャラクター表示 -->
+    <canvas id="main-canvas"></canvas>
+    <div id="safe-area-guide">
+        <div class="guide-ui-right"><span class="guide-text" style="top:-25px; right:5px;">アイコン等</span></div>
+        <div class="guide-ui-bottom"><span class="guide-text" style="top:-25px; left:5px;">説明文・タイトル</span></div>
+        <span class="guide-text" style="top:15px; left:15px;">✅ セーフエリア（この中に顔や手を収める）</span>
     </div>
-
-    <div id="net-host" style="display:none; flex-direction:column; align-items:center; width:100%;">
-        <p>このQRを相手に見せてください</p>
-        <div id="qr-display"></div>
-        <div style="margin-bottom:20px;">ID: <span id="host-id-text" style="font-weight:bold; color:var(--p1-color);">生成中...</span></div>
-        <div style="color:var(--p2-color); font-weight:bold;" class="blink">相手の接続待ち...</div>
-        <button class="btn" onclick="location.reload()" style="margin-top:20px;">キャンセル</button>
+    <div id="expression-toast"
+        style="position:fixed; top:20px; left:20px; background:rgba(0,0,0,0.6); color:white; padding:8px 16px; border-radius:20px; font-weight:bold; font-size:1rem; opacity:0; transition:opacity 0.3s; pointer-events:none; z-index:1000;">
+        😀 通常
     </div>
-
-    <div id="net-guest" style="display:none; flex-direction:column; align-items:center; width:100%;">
-        <div id="camera-wrapper"></div>
-        <button class="btn btn-primary" onclick="Network.startCamera()">📷 QRを読み取る</button>
-        <div style="margin:10px; color:#aaa;">または</div>
-        <input type="text" id="input-id" class="input-box" placeholder="招待コードを入力">
-        <button class="btn btn-accent" onclick="Network.joinByInput()">コードで参加</button>
-        <button class="btn" onclick="location.reload()" style="margin-top:20px;">もどる</button>
+    <div id="drop-overlay"
+        style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(40, 167, 69, 0.7); z-index:9999; flex-direction:column; align-items:center; justify-content:center; color:white; font-size:2.5rem; font-weight:bold; border: 8px dashed white; box-sizing:border-box; pointer-events:none;">
+        📂 JSON または VRM (.vrm) をここにドロップ
     </div>
-</div>
+    <!-- カメラプレビュー（自分確認用） -->
+    <video id="video-preview" autoplay playsinline></video>
+    <!-- ★追加: パネルが消えている時に出る「メニューボタン」 -->
+    <button id="ui-open-btn"
+        style="position:fixed; top:10px; right:10px; z-index:9999; width:40px; height:40px; border-radius:50%; border:none; background:rgba(40,167,69,0.9); color:white; font-size:1.2rem; cursor:pointer; display:none;"
+        onclick="toggleUIVisibility()">⚙️</button>
+    <!-- UIパネル -->
+    <div id="ui-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h2 style="margin:0; border:none;">Live2D Camera</h2>
+            <button onclick="toggleUIVisibility()"
+                style="background:none; border:none; font-size:1.2rem; cursor:pointer; padding:0 5px;">✕</button>
+        </div>
 
-<!-- 3. ゲーム画面 -->
-<div id="screen-game" class="screen">
-    <div class="game-container">
-        
-        <!-- ヘッダー情報 -->
-        <div class="hud">
-            <!-- 相手 -->
-            <div class="player-info p2-style">
-                <div class="player-name"><span>あいて</span> <span id="hp-text-p2">HP:3</span></div>
-                <div class="hp-bar-bg"><div id="hp-bar-p2" class="hp-bar"></div></div>
-            </div>
-            <!-- 自分 -->
-            <div class="player-info p1-style">
-                <div class="player-name"><span>あなた</span> <span id="hp-text-p1">HP:3</span></div>
-                <div class="hp-bar-bg"><div id="hp-bar-p1" class="hp-bar"></div></div>
+        <div class="group">
+            <label>1. 素材を読み込む</label>
+            <button class="btn-primary" onclick="document.getElementById('file-input').click()">ファイルロード
+                (JSON / VRM / VRMA)</button>
+            <input type="file" id="file-input" accept=".json, .vrm, .vrma" style="display:none">
+        </div>
+        <div class="group" id="vrm-camera-group"
+            style="display:none; background:rgba(0,123,255,0.1); padding:8px; border-radius:4px;">
+            <label>📷 VRM カメラアングル</label>
+            <div style="display: flex; gap: 3px;">
+                <button class="btn-secondary" style="flex-grow: 1; padding: 4px; font-size:0.65rem; margin:0;"
+                    onclick="setVRMCamera('face')">👁️ 顔アップ</button>
+                <button class="btn-secondary" style="flex-grow: 1; padding: 4px; font-size:0.65rem; margin:0;"
+                    onclick="setVRMCamera('bustup')">👤 バストアップ</button>
+                <button class="btn-secondary" style="flex-grow: 1; padding: 4px; font-size:0.65rem; margin:0;"
+                    onclick="setVRMCamera('fullbody')">🧍 全身表示</button>
             </div>
         </div>
-<div id="game-timer" style="font-family:'Orbitron'; font-size:2rem; font-weight:bold; color:var(--accent-gold); text-align:center; margin-bottom:5px; display:none;">
-    15
-</div>
-        <div id="status-msg" class="status-msg">あなたの番です</div>
 
-        <!-- 盤面 -->
-        <div class="board" id="board"></div>
+        <div class="group" id="vrm-action-group"
+            style="display:none; background:rgba(138,43,226,0.1); padding:8px; border-radius:4px;">
+            <label>💃 VRM アクション</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                <!-- ★追加: プリセットポーズのボタン -->
+                <button class="btn-secondary" style="flex-grow: 1; padding: 4px; font-size:0.7rem; margin:0;"
+                    onclick="playPresetPose('wave')">👋 手を振る</button>
+                <button class="btn-secondary" style="flex-grow: 1; padding: 4px; font-size:0.7rem; margin:0;"
+                    onclick="playPresetPose('star')">⭐ 大の字</button>
+                <button class="btn-primary" style="width: 100%; padding: 4px; font-size:0.7rem; background:#6c757d;"
+                    onclick="stopVRMAnimation()">🧍 モーション・姿勢リセット</button>
+            </div>
+        </div>
 
-        <button class="btn" onclick="Game.toTitle()" style="margin-top:20px; align-self:center; background:#444; color:#fff; font-size:1rem; padding:10px;">降参して戻る</button>
+        <!-- ★追加: OBS用出力ボタン -->
+        <div class="group" style="border-top: 1px solid #ddd; padding-top: 10px; margin-top:10px;">
+            <label>📺 外部出力 (OBS / 配信ツール用)</label>
+            <button class="btn-primary" style="background:#17a2b8;" onclick="openOBSWindow()">🪟 OBS用ウィンドウを開く</button>
+            <p style="font-size:0.6rem; color:#666; margin:2px 0;">※別窓で開いた映像をOBSで「ウィンドウキャプチャ」してください。</p>
+        </div>
+
+
+    <div class="group" id="vrm-light-group"
+        style="display:none; background:rgba(255,193,7,0.1); padding:8px; border-radius:4px;">
+        <label>💡 ライトの種類</label>
+        <select id="sel-light-type" style="width:100%; margin-bottom:10px; padding:5px;" onchange="updateLight()">
+            <option value="directional">☀️ 平行光源 (全体を照らす・影あり)</option>
+            <option value="spot">🔦 スポットライト (局所的な光・2灯)</option>
+        </select>
+
+        <label>🌑 空間の闇の深さ (環境光): <span id="val-ambient">0</span>%</label>
+        <input type="range" id="slider-ambient" min="0" max="100" value="0" oninput="updateLight()">
+
+        <!-- スポットライト限定の設定 -->
+        <div id="spot-settings">
+            <label style="margin-top:8px;">🔦 スポットの広がり: <span id="val-light-size">20</span></label>
+            <input type="range" id="slider-light-size" min="5" max="90" value="20" oninput="updateLight()">
+            <label>🎯 スポットのエッジ硬さ: <span id="val-light-edge">80</span></label>
+            <input type="range" id="slider-light-edge" min="0" max="100" value="80" oninput="updateLight()">
+        </div>
+
+        <div style="border-top:1px solid rgba(0,0,0,0.1); margin:8px 0; padding-top:8px;">
+            <label>🔴 メインライト <span style="font-size:0.6rem;font-weight:normal;">(強:<span id="val-l1-int">150</span>%
+                    左右:<span id="val-l1-x">30</span>° 上下:<span id="val-l1-y">20</span>°)</span></label>
+            <div class="flex-row">
+                <input type="color" id="light1-color" value="#ffffff" oninput="updateLight()"
+                    style="width:30px; height:24px;">
+                <input type="range" id="slider-light1-int" min="0" max="500" value="150" oninput="updateLight()"
+                    style="width:40px;">
+                <input type="range" id="slider-light1-x" min="-180" max="180" value="30" oninput="updateLight()"
+                    style="flex-grow:1;">
+                <input type="range" id="slider-light1-y" min="-90" max="90" value="20" oninput="updateLight()"
+                    style="flex-grow:1;">
+            </div>
+        </div>
+
+        <!-- サブライトはスポットライトの時だけ表示 -->
+        <div id="sub-light-group" style="border-top:1px solid rgba(0,0,0,0.1); margin-top:8px; padding-top:8px;">
+            <label>🔵 サブライト <span style="font-size:0.6rem;font-weight:normal;">(強:<span id="val-l2-int">100</span>%
+                    左右:<span id="val-l2-x">-120</span>° 上下:<span id="val-l2-y">0</span>°)</span></label>
+            <div class="flex-row">
+                <input type="color" id="light2-color" value="#0055ff" oninput="updateLight()"
+                    style="width:30px; height:24px;">
+                <input type="range" id="slider-light2-int" min="0" max="500" value="100" oninput="updateLight()"
+                    style="width:40px;">
+                <input type="range" id="slider-light2-x" min="-180" max="180" value="-120" oninput="updateLight()"
+                    style="flex-grow:1;">
+                <input type="range" id="slider-light2-y" min="-90" max="90" value="0" oninput="updateLight()"
+                    style="flex-grow:1;">
+            </div>
+        </div>
     </div>
-    
-    <!-- 操作ブロック -->
-    <div id="blocker"></div>
+    <div class="group">
+        <label>2. トラッキング連動</label>
+        <div class="group" style="font-size: 0.8rem; background:rgba(0,0,0,0.05); padding:5px; border-radius:4px;">
+    <label>🤖 AI処理設定 (重い場合はオフ)</label>
+    <label style="display:inline;"><input type="checkbox" id="chk-ai-pose" checked> 🧍 体(姿勢)</label>
+    <label style="display:inline; margin-left: 10px;"><input type="checkbox" id="chk-ai-hand" checked> ✋ 手</label>
 </div>
+        <div class="flex-row">
+            <button id="btn-camera" class="btn-secondary" style="flex-grow:1; margin-bottom:0; padding:8px 4px;"
+                onclick="toggleCamera()">🎥 カメラ</button>
+            <button id="btn-mic-only" class="btn-secondary" style="flex-grow:1; margin-bottom:0; padding:8px 4px;"
+                onclick="toggleMicOnly()">🎤 マイクのみ</button>
+            <button id="btn-switch-cam" class="btn-secondary"
+                style="width:40px; font-size:1.0rem; margin-bottom:0; padding:8px 0;" onclick="switchCamera()"
+                title="カメラ切り替え">🔄</button>
+        </div>
+        <div style="font-size: 0.75rem; margin-top: 8px; color: #dc3545;">
+            <label style="display:inline;"><input type="checkbox" id="chk-mute-out" onchange="updateAudioRouting()">
+                🔇 録画音声をミュート (口パクのみ実行)</label>
+        </div>
+    </div>
 
-<!-- 結果モーダル -->
-<div id="modal-result" class="modal">
-    <h2 id="result-title">YOU WIN!</h2>
-    <div id="result-desc" style="margin-bottom:30px; font-size:1.2rem;">相手の体力が尽きました</div>
-    <button class="btn btn-primary" onclick="location.reload()">タイトルへ</button>
-</div>
+    <div class="group">
+        <label>感度 (Sensitivity): <span id="val-sens">100</span>%</label>
+        <input type="range" id="slider-sens" min="10" max="300" value="100"
+            oninput="document.getElementById('val-sens').textContent = this.value">
 
-<script>
-/**
- * LINE VANISH - FINAL VERSION
- * - 盤面消去ロジック修正（揃ったラインのみ削除）
- * - レイアウト崩れ修正（clamp使用）
- * - HUBボタン追加
- */
+        <label>滑らかさ (Smoothing): <span id="val-smooth">70</span>%</label>
+        <input type="range" id="slider-smooth" min="0" max="95" value="70"
+            oninput="document.getElementById('val-smooth').textContent = this.value">
+    </div>
 
-const Sound = {
-    ctx: null,
-    init() { if(!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)(); },
-    play(type) {
-        if(!this.ctx) return;
-        const t = this.ctx.currentTime;
-        const o = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
-        o.connect(g); g.connect(this.ctx.destination);
-        if(type === 'place') {
-            o.frequency.setValueAtTime(400, t); g.gain.exponentialRampToValueAtTime(0.01, t+0.1); o.start(); o.stop(t+0.1);
-        } else if(type === 'vanish') {
-            o.type = 'sawtooth'; o.frequency.setValueAtTime(150, t); g.gain.linearRampToValueAtTime(0, t+0.3); o.start(); o.stop(t+0.3);
-        } else if(type === 'damage') {
-            o.type = 'square'; o.frequency.setValueAtTime(100, t); o.frequency.linearRampToValueAtTime(50, t+0.2); g.gain.exponentialRampToValueAtTime(0.01, t+0.3); o.start(); o.stop(t+0.3);
-        } else if(type === 'win') {
-            o.type = 'triangle'; o.frequency.setValueAtTime(523, t); o.frequency.setValueAtTime(1046, t+0.2); g.gain.linearRampToValueAtTime(0, t+0.5); o.start(); o.stop(t+0.5);
+    <!-- 背景設定の拡張 -->
+    <div class="group">
+        <label>背景設定</label>
+        <div class="flex-row">
+            <select id="sel-bg" style="flex-grow:1; padding:5px;" onchange="changeBg(this.value)">
+                <option value="#00ff00">グリーンバック</option>
+                <option value="transparent">完全透過 (透明)</option>
+                <option value="#0000ff">ブルーバック</option>
+                <option value="file">🖼️ 画像・動画を選択...</option> <!-- ★追加 -->
+                <option value="custom">カスタムカラー...</option>
+            </select>
+            <input type="color" id="bg-color-picker" value="#ff00ff" style="width:40px; display:none;">
+            <!-- ★追加: 背景用の隠しファイル入力 -->
+            <input type="file" id="bg-file-input" accept="image/*,video/*" style="display:none">
+        </div>
+    </div>
+
+    <!-- センターリセットボタン -->
+    <div class="group">
+        <button class="btn-secondary" style="background:#007bff;" onclick="calibrateFace()">📍 センターリセット
+            (今の顔を正面に)</button>
+        <p style="font-size:0.6rem; color:#666; text-align:center;">[Space]キーで操作パネルを隠せます</p>
+    </div>
+
+    <!-- ★ボイスチェンジャー＆音声設定 -->
+    <div class="group" style="background:rgba(255,100,100,0.1); padding:8px; border-radius:4px;">
+        <label>🎙️ ボイスチェンジャー (※イヤホン推奨)</label>
+        <div style="font-size: 0.8rem; margin-bottom: 5px;">
+            <label style="display:inline;"><input type="checkbox" id="chk-vc-enable" onchange="updateAudioRouting()">
+                有効化</label>
+            <label style="display:inline; margin-left: 10px;"><input type="checkbox" id="chk-vc-monitor"
+                    onchange="updateAudioRouting()"> 🎧 自分の声を聞く</label>
+        </div>
+
+        <label>声の高さ (Pitch): <span id="val-pitch">0</span></label>
+        <input type="range" id="slider-pitch" min="-24" max="24" value="0" step="1" oninput="updatePitch()">
+
+        <div style="border-top:1px dashed rgba(0,0,0,0.2); margin-top:8px; padding-top:8px;">
+            <label>リップシンク (マイク感度): <span id="val-mic">50</span>%</label>
+            <input type="range" id="slider-mic-sens" min="0" max="200" value="50"
+                oninput="document.getElementById('val-mic').textContent = this.value">
+            <label>環境音カット (ノイズゲート): <span id="val-noise">10</span>%</label>
+            <input type="range" id="slider-noise" min="0" max="50" value="10"
+                oninput="document.getElementById('val-noise').textContent = this.value">
+        </div>
+    </div>
+
+    <!-- 自動モーション・ロック設定 -->
+    <div class="group">
+        <label>モーション・ロック</label>
+        <div style="font-size: 0.8rem; margin-bottom: 5px;">
+            <label style="display:inline;"><input type="checkbox" id="chk-auto-blink" checked> 自動まばたき</label>
+            <label style="display:inline; margin-left: 10px;"><input type="checkbox" id="chk-breathing" checked>
+                呼吸</label>
+        </div>
+        <div style="font-size: 0.8rem; margin-bottom: 5px;">
+            <label style="display:inline;"><input type="checkbox" id="chk-mirror" checked> 🪞 ミラー</label>
+            <!-- ★追加: 目と口の固定チェックボックス -->
+            <label style="display:inline; margin-left: 10px; color: #dc3545;"><input type="checkbox" id="chk-lock-eye">
+                👁️ 目を固定</label>
+            <label style="display:inline; margin-left: 10px; color: #dc3545;"><input type="checkbox"
+                    id="chk-lock-mouth"> 👄 口を固定</label>
+        </div>
+    </div>
+
+    <!-- ★追加: VRM固有の表情コントロール -->
+    <div class="group" id="vrm-expressions-group"
+        style="display:none; background:rgba(255,105,180,0.1); padding:8px; border-radius:4px;">
+        <label>🎭 VRM 表情・パーツ操作</label>
+
+        <!-- 感情ボタンエリア -->
+        <div style="font-size: 0.75rem; margin-bottom: 5px; color: #555;">▼ 感情 (ショートカット対応)</div>
+        <div id="vrm-emotion-buttons" style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px;">
+            <!-- ここに感情ボタンが生成されます -->
+        </div>
+
+        <!-- パーツスライダーエリア -->
+        <div style="font-size: 0.75rem; margin-bottom: 5px; color: #555;">▼ カスタムパーツ</div>
+        <div id="vrm-expressions-list"
+            style="max-height: 120px; overflow-y: auto; padding-right: 5px; border-top: 1px dashed rgba(0,0,0,0.2); padding-top: 5px;">
+            <!-- ここにスライダーが生成されます -->
+        </div>
+    </div>
+
+    <!-- ★追加: 配置とスケール設定 (9点配置) -->
+    <div class="group" style="background:rgba(40, 167, 69, 0.1); padding:8px; border-radius:4px;">
+        <label>📺 画面配置 (実況用)</label>
+        <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 5px;">
+            <span style="font-size:0.7rem;">サイズ</span>
+            <input type="range" id="slider-scale" min="10" max="150" value="100" oninput="updateLayout()"
+                style="margin:0; flex-grow:1;">
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;">
+            <button class="btn-secondary" style="padding: 4px; font-size:0.7rem; margin:0;"
+                onclick="setLayout('left', 'top')">↖ 左上</button>
+            <button class="btn-secondary" style="padding: 4px; font-size:0.7rem; margin:0;"
+                onclick="setLayout('center', 'top')">⬆ 中上</button>
+            <button class="btn-secondary" style="padding: 4px; font-size:0.7rem; margin:0;"
+                onclick="setLayout('right', 'top')">↗ 右上</button>
+            <button class="btn-secondary" style="padding: 4px; font-size:0.7rem; margin:0;"
+                onclick="setLayout('left', 'center')">⬅ 左中</button>
+            <button class="btn-primary" style="padding: 4px; font-size:0.7rem; margin:0;"
+                onclick="setLayout('center', 'center')">🎯 中央</button>
+            <button class="btn-secondary" style="padding: 4px; font-size:0.7rem; margin:0;"
+                onclick="setLayout('right', 'center')">➡ 右中</button>
+            <button class="btn-secondary" style="padding: 4px; font-size:0.7rem; margin:0;"
+                onclick="setLayout('left', 'bottom')">↙ 左下</button>
+            <button class="btn-secondary" style="padding: 4px; font-size:0.7rem; margin:0;"
+                onclick="setLayout('center', 'bottom')">⬇ 中下</button>
+            <button class="btn-secondary" style="padding: 4px; font-size:0.7rem; margin:0;"
+                onclick="setLayout('right', 'bottom')">↘ 右下</button>
+        </div>
+    </div>
+<!-- ★追加: ショート動画・解像度設定 -->
+    <div class="group" style="background:rgba(23, 162, 184, 0.1); padding:8px; border-radius:4px;">
+        <label>📱 画面サイズ (録画解像度)</label>
+        <select id="sel-resolution" style="width:100%; margin-bottom:8px; padding:5px; font-weight:bold;" onchange="changeResolution(this.value)">
+            <option value="landscape">横型動画 (16:9 / 1280x720)</option>
+            <option value="portrait">📱 ショート縦型 (9:16 / 720x1280)</option>
+            <option value="square">正方形 (1:1 / 800x800)</option>
+        </select>
+        <div style="font-size: 0.75rem; color: #dc3545; font-weight:bold;">
+            <label style="display:inline;">
+                <input type="checkbox" id="chk-safe-area" onchange="toggleSafeArea()"> 📐 SNS安全圏ガイドを表示
+            </label>
+            <p style="margin:2px 0 0 20px; font-weight:normal; color:#666; font-size:0.65rem;">※赤い部分にUIが被ります。録画には映りません。</p>
+        </div>
+    </div>
+    <!-- 表情キー案内 -->
+    <div class="group" id="expression-guide-group" style="background:rgba(0,0,0,0.05); padding:5px; border-radius:4px;">
+        <label>表情キー (数字キー1〜9)</label>
+        <div id="expression-key-guide" style="font-size:0.65rem; color:#555; line-height: 1.4;">
+            [1] 通常 [2] 怒り(AngleZ) [3] 驚き(Eye) [4] 笑い(Mouth) [5] 照れ(Opacity)
+        </div>
+    </div>
+
+    <!-- 録画コントロールの追加 -->
+    <!-- 録画・エクスポートコントロール -->
+    <div class="group" style="border-top: 1px solid #ddd; padding-top: 10px;">
+        <label>3. 録画・エクスポート</label>
+        <select id="sel-record-format" style="width:100%; margin-bottom:8px; padding:5px; font-weight:bold;">
+            <option value="mp4">🎥 MP4 (高画質・動画)</option>
+            <option value="webm">🎥 WebM (標準・動画)</option>
+            <option value="mp3">🎵 MP3 (音声のみ)</option>
+        </select>
+        <button id="btn-record" class="btn-primary" style="background:#dc3545;" onclick="toggleRecording()">⏺
+            録画開始</button>
+        <p id="record-status" style="font-size:0.65rem; color:red; text-align:center; display:none;">● RECORDING...
+        </p>
+    </div>
+
+    <div class="status" id="status-text">JSONを待機中...</div>
+    </div>
+
+    <!-- ローディング表示 -->
+    <div id="loading-overlay">
+        <div style="font-size: 1.5rem; margin-bottom: 10px;">⌛</div>
+        <div id="loading-text">AIモデルを読み込み中...</div>
+    </div>
+
+    <script>
+        // === グローバル変数 ===
+        let layers = [];
+        let currentAppMode = '2d';
+        let vrmCanvas = document.createElement('canvas');
+        // ↓★修正: vrmControls を追加
+        let vrmRenderer, vrmScene, vrmCamera, vrmControls, currentVrm, vrmClock;
+        let currentBgColor = '#00ff00';
+        let bgImage = null;
+        let bgVideo = null;
+        let currentCameraMode = 'bustup'; // ★追加: 現在のカメラアングル
+        let smoothPose = { lArm: 0, rArm: 0, lFore: 0, rFore: 0, lLeg: 0, rLeg: 0 };
+        let poseData = {
+            lArm: 0, rArm: 0, lFore: 0, rFore: 0, lLeg: 0, rLeg: 0,
+            lVis: false, rVis: false, legVis: false
+        };
+
+        function setVRMCamera(mode) {
+            if (!vrmCamera || !vrmControls || !currentVrm) return;
+            currentCameraMode = mode;
+            let headY = 1.45;
+            const headNode = currentVrm.humanoid.getNormalizedBoneNode('head');
+            if (headNode) {
+                const worldPos = new window.THREE.Vector3();
+                headNode.getWorldPosition(worldPos);
+                headY = worldPos.y;
+            }
+
+            if (mode === 'ultra') {
+                vrmCamera.position.set(0.0, headY, 0.35); // ★追加: 超アップ
+                vrmControls.target.set(0.0, headY, 0.0);
+            } else if (mode === 'face') {
+                vrmCamera.position.set(0.0, headY, 0.55);
+                vrmControls.target.set(0.0, headY, 0.0);
+            } else if (mode === 'bustup') {
+                vrmCamera.position.set(0.0, headY - 0.05, 1.4);
+                vrmControls.target.set(0.0, headY - 0.1, 0.0);
+            } else if (mode === 'fullbody') {
+                vrmCamera.position.set(0.0, headY * 0.6, 3.3);
+                vrmControls.target.set(0.0, headY * 0.6, 0.0);
+            }
+            vrmControls.update();
         }
+
+        let CANVAS_W = 640, CANVAS_H = 320;
+        let live2dParams = {
+            angleX: 0, angleY: 0, angleZ: 0, eyeL: 0, eyeR: 0, mouth: 0,
+            aiA: 0, aiI: 0, aiU: 0 // ★追加: AIによる母音解析用
+        };
+        let faceLandmarker;
+        let video;
+        let lastVideoTime = -1;
+        let isCameraActive = false;
+        let currentFacingMode = "user"; // ★追加: カメラの向き（user: 内カメ, environment: 外カメ）
+
+        // ★追加: 物理演算（揺れもの）用の遅延計算変数
+        let physicsState = { x: 0, y: 0, vx: 0, vy: 0 };
+        let smoothMouth = { aa: 0, ih: 0, ou: 0 };
+        let vrmDirectionalLight, vrmSpotLight1, vrmSpotLight2, vrmAmbientLight;
+
+        const mainCan = document.getElementById('main-canvas');
+        const ctx = mainCan.getContext('2d');
+        const $ = (id) => document.getElementById(id);
+        const uiPanel = $('ui-panel');
+        ['mousedown', 'touchstart', 'wheel', 'pointerdown'].forEach(evt => {
+            uiPanel.addEventListener(evt, (e) => {
+                e.stopPropagation(); // UIでの操作イベントをキャンバス（3D空間）に貫通させない
+            }, { passive: false });
+        });
+        // --- 録画用の変数 ---
+        let mediaRecorder;
+        let recordedChunks = [];
+        let isRecording = false;
+
+        // --- 新規追加の変数 ---
+        let faceOffset = { angleX: 0, angleY: 0, angleZ: 0 }; // リセット用
+        let lastRawRot = { x: 0, y: 0, z: 0 }; // ★追加: 宣言を先頭に移動
+        let audioContext, analyser, dataArray; // リップシンク用
+        let micLevel = 0;
+        let blinkValue = 0; // まばたき用
+        let expressionOffset = { angleX: 0, angleY: 0, angleZ: 0, eyeL: 0, eyeR: 0, mouth: 0, opacity: 0 }; // 表情キー用
+
+        // ★追加: レイアウト配置用の変数と関数
+        let currentLayoutOrigin = '50% 50%'; // デフォルト中央
+
+        // ★配置状態を管理する変数
+        let currentAlignX = 'center';
+        let currentAlignY = 'center';
+        let currentResolutionType = 'landscape';
+
+        function changeResolution(type) {
+    if (isRecording) {
+        alert("録画中は解像度を変更できません。");
+        $('sel-resolution').value = currentResolutionType; 
+        return;
     }
-};
-
-const Network = {
-    peer: null, conn: null, isHost: false, scanner: null,
     
-    openMenu() {
-        document.querySelectorAll('.screen').forEach(e => e.classList.remove('active'));
-        document.getElementById('screen-network').classList.add('active');
-        document.getElementById('net-select').style.display='flex';
-        document.getElementById('net-host').style.display='none';
-        document.getElementById('net-guest').style.display='none';
-    },
-    initHost() {
-        Sound.init();
-        document.getElementById('net-select').style.display='none';
-        document.getElementById('net-host').style.display='flex';
-        this.peer = new Peer();
-        this.peer.on('open', id => {
-            document.getElementById('host-id-text').innerText = id;
-            document.getElementById('qr-display').innerHTML = "";
-            new QRCode(document.getElementById("qr-display"), { text: id, width: 160, height: 160 });
-        });
-        this.peer.on('connection', c => {
-            this.conn = c; this.setupConn(); Game.startOnline(true);
-        });
-    },
-    showGuest() {
-        document.getElementById('net-select').style.display='none';
-        document.getElementById('net-guest').style.display='flex';
-    },
-    startCamera() {
-        Sound.init();
-        const wrap = document.getElementById('camera-wrapper');
-        wrap.style.display = 'block';
-        this.scanner = new Html5QrcodeScanner("camera-wrapper", { fps: 10, qrbox: 200 });
-        this.scanner.render((decoded) => {
-            this.join(decoded); this.scanner.clear(); wrap.style.display = 'none';
-        });
-    },
-    joinByInput() {
-        const id = document.getElementById('input-id').value;
-        if(id) this.join(id);
-    },
-    join(id) {
-        Sound.init();
-        this.peer = new Peer();
-        this.peer.on('open', () => {
-            this.conn = this.peer.connect(id);
-            this.isHost = false;
-            this.setupConn();
-            Game.startOnline(false);
-        });
-        this.peer.on('error', () => alert("接続できませんでした"));
-    },
-    setupConn() {
-        this.conn.on('data', d => Game.onData(d));
-        this.conn.on('close', () => { alert("通信切断"); location.reload(); });
-        this.conn.on('open', () => console.log("Connected"));
-    },
-    send(d) { if(this.conn && this.conn.open) this.conn.send(d); }
-};
+    currentResolutionType = type;
+    
+    // ★修正: エンコーダーの制約（16の倍数）に合わせる
+    if (type === 'landscape') {
+        CANVAS_W = 1280; CANVAS_H = 720;
+    } else if (type === 'portrait') {
+        CANVAS_W = 720; CANVAS_H = 1280; // (720は16の倍数)
+    } else if (type === 'square') {
+        CANVAS_W = 800; CANVAS_H = 800;  // (800は16の倍数)
+    }
 
-const Game = {
-        timer: 15,
-    timerId: null,
-    mode: 'local', role: 'p1', turn: 'p1',
-    board: Array(9).fill(null),
-    moves: { p1: [], p2: [] },
-    hp: { p1: 3, p2: 3 },
-        startTimer(sec) {
-        this.stopTimer();
-        this.timer = sec;
-        const el = document.getElementById('game-timer');
-        el.style.display = 'block';
-        el.innerText = this.timer;
-        el.classList.remove('timer-danger');
+            // メインキャンバスの解像度を更新
+            mainCan.width = CANVAS_W;
+            mainCan.height = CANVAS_H;
 
-        this.timerId = setInterval(() => {
-            this.timer--;
-            el.innerText = this.timer;
-            if (this.timer <= 5) el.classList.add('timer-danger');
-            
-            if (this.timer <= 0) {
-                this.stopTimer();
-                this.autoMove(); // 時間切れ時に自動で置く
+            // ガイド枠の実体サイズをキャンバスに合わせる
+            const guide = $('safe-area-guide');
+            if (guide) {
+                guide.style.width = CANVAS_W + 'px';
+                guide.style.height = CANVAS_H + 'px';
             }
-        }, 1000);
-    },
 
-    // タイマー停止
-    stopTimer() {
-        if (this.timerId) clearInterval(this.timerId);
-        document.getElementById('game-timer').style.display = 'none';
-    },
-
-    // 時間切れ時の自動配置
-    autoMove() {
-        // 空いているマスをすべて探す
-        const emptyCells = [];
-        this.board.forEach((val, i) => {
-            if (val === null) emptyCells.push(i);
-        });
-        
-        if (emptyCells.length > 0) {
-            // ランダムに1つ選んで配置
-            const randomIdx = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-            // オンライン対戦時は、自分のターンのみ自動配置を実行して送信
-            if (this.mode === 'online') {
-                if (this.turn === this.role) this.onClick(randomIdx);
-            } else {
-                this.onClick(randomIdx);
+            // VRMモードなら、3D空間のカメラアスペクト比も更新
+            if (currentAppMode === 'vrm' && vrmRenderer && vrmCamera) {
+                vrmCanvas.width = CANVAS_W;
+                vrmCanvas.height = CANVAS_H;
+                vrmRenderer.setSize(CANVAS_W, CANVAS_H);
+                vrmCamera.aspect = CANVAS_W / CANVAS_H;
+                vrmCamera.updateProjectionMatrix();
             }
+
+            // レイアウト（拡大縮小・配置）を再計算
+            updateLayout();
         }
-    },
-    initLocal() { Sound.init(); this.mode = 'local'; this.role = 'p1'; this.startGame(); },
-    startOnline(isHost) { this.mode = 'online'; this.role = isHost ? 'p1' : 'p2'; this.startGame(); },
-    
-    startGame() {
-        document.querySelectorAll('.screen').forEach(e => e.classList.remove('active'));
-        document.getElementById('screen-game').classList.add('active');
-        this.board.fill(null);
-        this.moves = { p1: [], p2: [] };
-        this.hp = { p1: 3, p2: 3 };
-        this.turn = 'p1';
-        this.renderBoard();
-        this.updateHUD();
-        this.updateStatus();
-    },
-    
-    renderBoard() {
-        const boardEl = document.getElementById('board');
-        boardEl.innerHTML = '';
-        this.board.forEach((cell, i) => {
-            const el = document.createElement('div');
-            el.className = 'cell';
-            if(cell) {
-                const mark = document.createElement('div');
-                mark.className = 'cell-mark ' + ((cell==='p1') ? 'mark-x' : 'mark-o');
-                mark.innerText = (cell==='p1') ? '×' : '○';
-                el.appendChild(mark);
-                el.classList.add('marked');
-            }
-            // 次に消えるコマの予告
-            const nextMover = this.turn;
-            if(this.moves[nextMover].length >= 3) {
-                const vanishingIdx = this.moves[nextMover][0];
-                if(i === vanishingIdx) el.classList.add('fading');
-            }
-            el.onclick = () => this.onClick(i);
-            boardEl.appendChild(el);
-        });
-    },
-    
-    onClick(i) {
-        if(this.mode === 'online' && this.turn !== this.role) return;
-        if(this.board[i] !== null) return;
-        this.processMove(i);
-        if(this.mode === 'online') Network.send({ type: 'move', index: i });
-    },
-    
-    processMove(i) {
-         this.stopTimer();
-        const player = this.turn;
-        // FIFOロジック
-        if(this.moves[player].length >= 3) {
-            const oldIdx = this.moves[player].shift();
-            this.board[oldIdx] = null;
-            Sound.play('vanish');
+
+        function toggleSafeArea() {
+            const guide = $('safe-area-guide');
+            if (guide) guide.style.display = $('chk-safe-area').checked ? 'block' : 'none';
         }
-        this.board[i] = player;
-        this.moves[player].push(i);
-        Sound.play('place');
-        this.renderBoard();
-        
-        // 勝利ラインチェック
-        const winLine = this.checkWinLine(player);
-        if(winLine) {
-            setTimeout(() => this.applyDamage(player, winLine), 500);
-        } else {
-            this.turn = (this.turn === 'p1') ? 'p2' : 'p1';
-            this.updateStatus();
-            this.renderBoard();
-        }
-    },
-    
-    checkWinLine(player) {
-        const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-        return lines.find(l => l.every(idx => this.board[idx] === player));
-    },
-    
-    applyDamage(attacker, winLine) {
-         this.stopTimer();
-        const defender = (attacker === 'p1') ? 'p2' : 'p1';
-        this.hp[defender]--;
-        Sound.play('damage');
-        this.updateHUD();
-        
-        const msg = (this.mode==='local' || this.role===attacker) ? "攻撃成功！ ダメージ！" : "攻撃された！ ダメージ！";
-        this.setMessage(msg);
-        document.getElementById('blocker').style.display = 'block';
-        
-        setTimeout(() => {
-            if(this.hp[defender] <= 0) {
-                this.gameOver(attacker);
-            } else {
-                // 【修正】揃ったラインのコマのみを消去
-                winLine.forEach(idx => {
-                    this.board[idx] = null;
-                    // 履歴からも削除 (FIFOの整合性を保つため)
-                    const mIdx = this.moves[attacker].indexOf(idx);
-                    if(mIdx !== -1) this.moves[attacker].splice(mIdx, 1);
-                });
+        // === ★追加: ボイスチェンジャー（ピッチシフター）の音声処理エンジン ===
+        const pitchShifterCode = `
+        class PitchShifterProcessor extends AudioWorkletProcessor {
+            constructor() {
+                super();
+                this.delayBuffer = new Float32Array(48000 * 2);
+                this.writePos = 0;
+                this.pitchRatio = 1.0;
+                this.readPos1 = 0;
+                this.readPos2 = 0; 
+                this.windowSize = 2500; // ★極端なピッチ変更に合わせて窓サイズを少し拡大
+                this.readPos2 = this.windowSize / 2; // 位相を180度ずらす
                 
-                // ターン交代
-                this.turn = defender;
-                this.renderBoard();
-                this.updateStatus();
-                document.getElementById('blocker').style.display = 'none';
+                this.port.onmessage = (e) => {
+                    if (e.data.pitchRatio !== undefined) this.pitchRatio = e.data.pitchRatio;
+                };
             }
-        }, 1500);
-    },
-    
-    updateHUD() {
-        document.getElementById('hp-bar-p1').style.width = (this.hp.p1/3)*100 + '%';
-        document.getElementById('hp-text-p1').innerText = 'HP:' + this.hp.p1;
-        document.getElementById('hp-bar-p2').style.width = (this.hp.p2/3)*100 + '%';
-        document.getElementById('hp-text-p2').innerText = 'HP:' + this.hp.p2;
-    },
-    
-    updateStatus() {
-        let msg = "";
-        if(this.mode === 'local') {
-            msg = (this.turn === 'p1') ? "あなた(青) の番です" : "あいて(赤) の番です";
-        } else {
-            if(this.turn === this.role) {
-                msg = "あなたの番です";
-                document.getElementById('blocker').style.display = 'none';
-            } else {
-                msg = "あいての番です";
-                document.getElementById('blocker').style.display = 'block';
-            }
-        }
-        this.setMessage(msg);
-      if (this.mode === 'local') {
-            this.startTimer(15);
-        } else {
-            if (this.turn === this.role) {
-                this.startTimer(15);
-            } else {
-                this.stopTimer(); // 相手のターンは止める
+            process(inputs, outputs) {
+                const input = inputs[0][0];
+                const output = outputs[0][0];
+                if (!input || !output) return true;
+
+                for (let i = 0; i < input.length; i++) {
+                    this.delayBuffer[this.writePos] = input[i];
+                    
+                    // 読み出しポインタをピッチの比率で進める（遅延時間を変えてピッチを変える）
+                    this.readPos1 += this.pitchRatio;
+                    this.readPos2 += this.pitchRatio;
+                    if (this.readPos1 >= this.windowSize) this.readPos1 -= this.windowSize;
+                    if (this.readPos2 >= this.windowSize) this.readPos2 -= this.windowSize;
+
+                    let idx1 = Math.floor(this.writePos - this.readPos1);
+                    if (idx1 < 0) idx1 += this.delayBuffer.length;
+                    let idx2 = Math.floor(this.writePos - this.readPos2);
+                    if (idx2 < 0) idx2 += this.delayBuffer.length;
+
+                    // 2つの遅延音をクロスフェードさせてノイズを減らす
+                    let fade1 = 1.0 - Math.abs((this.readPos1 - this.windowSize/2) / (this.windowSize/2));
+                    let fade2 = 1.0 - Math.abs((this.readPos2 - this.windowSize/2) / (this.windowSize/2));
+
+                    output[i] = (this.delayBuffer[idx1] * fade1 + this.delayBuffer[idx2] * fade2);
+
+                    this.writePos++;
+                    if (this.writePos >= this.delayBuffer.length) this.writePos = 0;
+                }
+                return true;
             }
         }
-    },
-    
-    setMessage(txt) { document.getElementById('status-msg').innerText = txt; },
-    
-    gameOver(winner) {
-        Sound.play('win');
-        const modal = document.getElementById('modal-result');
-        const title = document.getElementById('result-title');
-        modal.style.display = 'flex';
-        
-        if(this.mode === 'local') {
-            title.innerText = (winner === 'p1') ? "青の勝ち！" : "赤の勝ち！";
-            title.className = (winner === 'p1') ? "win" : "lose";
-        } else {
-            if(winner === this.role) {
-                title.innerText = "あなたの勝ち！";
-                title.className = "win";
+        registerProcessor('pitch-shifter', PitchShifterProcessor);
+        `;
+        function setLayout(x, y) {
+            currentAlignX = x;
+            currentAlignY = y;
+            updateLayout();
+        }
+        function updateLayout() {
+            const canvas = $('main-canvas');
+            const panel = $('ui-panel');
+            const openBtn = $('ui-open-btn');
+            const scale = parseInt($('slider-scale').value) / 100;
+            const isPanelVisible = !panel.classList.contains('hidden');
+
+            // スマホ用ボタンの表示制御
+            openBtn.style.display = isPanelVisible ? 'none' : 'block';
+
+            // リセット
+            canvas.style.top = canvas.style.bottom = canvas.style.left = canvas.style.right = 'auto';
+
+            // パネルの幅（余白込みで約310px）
+            const panelWidth = isPanelVisible ? 310 : 0;
+
+            // 1. 垂直方向（上下）の計算
+            if (currentAlignY === 'top') {
+                canvas.style.top = '0px';
+            } else if (currentAlignY === 'bottom') {
+                canvas.style.bottom = '0px';
             } else {
-                title.innerText = "あなたの負け...";
-                title.className = "lose";
+                canvas.style.top = '50%';
+            }
+
+            // 2. 水平方向（左右・中央）の計算
+            if (currentAlignX === 'left') {
+                canvas.style.left = '0px';
+            } else if (currentAlignX === 'right') {
+                canvas.style.right = panelWidth + 'px';
+            } else {
+                // ★修正: 「画面の左端」から「パネルの左端」までの中心を計算する
+                canvas.style.left = `calc(50% - ${panelWidth / 2}px)`;
+            }
+
+            canvas.style.transformOrigin = `${currentAlignX} ${currentAlignY}`;
+            let tx = (currentAlignX === 'center') ? '-50%' : '0';
+            let ty = (currentAlignY === 'center') ? '-50%' : '0';
+            canvas.style.transform = `translate(${tx}, ${ty}) scale(${scale})`;
+
+            // --- ↓★ここから下を追加 ---
+            const guide = $('safe-area-guide');
+            if (guide) {
+                // キャンバスと全く同じCSSをガイド枠にも適用する
+                guide.style.top = canvas.style.top;
+                guide.style.bottom = canvas.style.bottom;
+                guide.style.left = canvas.style.left;
+                guide.style.right = canvas.style.right;
+                guide.style.transformOrigin = canvas.style.transformOrigin;
+                guide.style.transform = canvas.style.transform;
             }
         }
-    },
-    
-    toTitle() {
-        if(Network.peer) { Network.peer.destroy(); Network.peer = null; }
-        location.reload();
-    },
-    
-    onData(d) {
-        if(d.type === 'move') this.processMove(d.index);
+
+        // === ★修正: 背景コントロール（録画対応版） ===
+        function changeBg(val) {
+            const picker = $('bg-color-picker');
+            bgImage = null;
+            if (bgVideo) { bgVideo.pause(); bgVideo.src = ""; bgVideo = null; }
+
+            if (val === 'custom') {
+                picker.style.display = 'block';
+                currentBgColor = picker.value;
+            } else if (val === 'transparent') {
+                picker.style.display = 'none';
+                currentBgColor = 'transparent';
+                // 透過時はわかりやすいように市松模様をbodyに敷く
+                document.body.style.background = 'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVQ4T2NkYNgfzcDAwMgAI0AMRiMIMA7QQ2XAwzRQj8uApml00EQzRjPIsIEsDAwAnvM/w0Qh8/EAAAAASUVORK5CYII=") repeat';
+                return;
+            } else if (val === 'file') {
+                picker.style.display = 'none';
+                $('bg-file-input').click();
+                currentBgColor = 'transparent';
+            } else {
+                picker.style.display = 'none';
+                currentBgColor = val;
+            }
+            document.body.style.background = currentBgColor === 'transparent' ? '#000' : currentBgColor;
+        }
+        function updateLight() {
+            if (!vrmAmbientLight) return;
+
+            const lightType = $('sel-light-type').value;
+            const ambient = parseInt($('slider-ambient').value) / 100;
+            $('val-ambient').textContent = Math.round(ambient * 100);
+            vrmAmbientLight.intensity = ambient;
+
+            // UIの表示切り替え
+            $('spot-settings').style.display = (lightType === 'spot') ? 'block' : 'none';
+            $('sub-light-group').style.display = (lightType === 'spot') ? 'block' : 'none';
+
+            // 共通パラメータの取得
+            const int1 = parseInt($('slider-light1-int').value);
+            const deg1X = parseInt($('slider-light1-x').value);
+            const deg1Y = parseInt($('slider-light1-y').value);
+            const color1 = $('light1-color').value;
+
+            // ★追加: メインライトの数値をUIに表示
+            $('val-l1-int').textContent = int1;
+            $('val-l1-x').textContent = deg1X;
+            $('val-l1-y').textContent = deg1Y;
+
+            const rad1X = deg1X * (Math.PI / 180);
+            const rad1Y = deg1Y * (Math.PI / 180);
+
+            if (lightType === 'directional') {
+                // --- 平行光源モード ---
+                vrmDirectionalLight.visible = true;
+                vrmSpotLight1.visible = false;
+                vrmSpotLight2.visible = false;
+
+                vrmDirectionalLight.intensity = (int1 / 100) * 1.5;
+                vrmDirectionalLight.color.set(color1);
+
+                vrmDirectionalLight.position.set(
+                    Math.sin(rad1X) * Math.cos(rad1Y),
+                    Math.sin(rad1Y),
+                    Math.cos(rad1X) * Math.cos(rad1Y)
+                ).normalize();
+
+            } else {
+                // --- スポットライトモード ---
+                vrmDirectionalLight.visible = false;
+                vrmSpotLight1.visible = true;
+                vrmSpotLight2.visible = true;
+
+                const sizeDeg = parseInt($('slider-light-size').value);
+                const edge = 1.0 - (parseInt($('slider-light-edge').value) / 100);
+                $('val-light-size').textContent = sizeDeg;
+                $('val-light-edge').textContent = Math.round((1.0 - edge) * 100);
+
+                const angleRad = sizeDeg * (Math.PI / 180);
+                const dist = 2.5;
+
+                // メインスポットライト
+                vrmSpotLight1.intensity = (int1 / 100) * 3;
+                vrmSpotLight1.color.set(color1);
+                vrmSpotLight1.angle = angleRad;
+                vrmSpotLight1.penumbra = edge;
+
+                vrmSpotLight1.position.set(
+                    Math.sin(rad1X) * Math.cos(rad1Y) * dist,
+                    Math.sin(rad1Y) * dist + 1.2,
+                    Math.cos(rad1X) * Math.cos(rad1Y) * dist
+                );
+                vrmSpotLight1.target.position.set(0, 1.2, 0);
+                vrmSpotLight1.target.updateMatrixWorld();
+
+                // サブスポットライト
+                const int2 = parseInt($('slider-light2-int').value);
+                const deg2X = parseInt($('slider-light2-x').value);
+                const deg2Y = parseInt($('slider-light2-y').value);
+                const color2 = $('light2-color').value;
+
+                // ★追加: サブライトの数値をUIに表示
+                $('val-l2-int').textContent = int2;
+                $('val-l2-x').textContent = deg2X;
+                $('val-l2-y').textContent = deg2Y;
+
+                const rad2X = deg2X * (Math.PI / 180);
+                const rad2Y = deg2Y * (Math.PI / 180);
+
+                vrmSpotLight2.intensity = (int2 / 100) * 3;
+                vrmSpotLight2.color.set(color2);
+                vrmSpotLight2.angle = angleRad;
+                vrmSpotLight2.penumbra = edge;
+
+                vrmSpotLight2.position.set(
+                    Math.sin(rad2X) * Math.cos(rad2Y) * dist,
+                    Math.sin(rad2Y) * dist + 1.2,
+                    Math.cos(rad2X) * Math.cos(rad2Y) * dist
+                );
+                vrmSpotLight2.target.position.set(0, 1.2, 0);
+                vrmSpotLight2.target.updateMatrixWorld();
+            }
+        }
+
+
+        // カラーピッカーをいじった時の処理
+        $('bg-color-picker').oninput = (e) => {
+            currentBgColor = e.target.value;
+            document.body.style.background = currentBgColor;
+        };
+
+        // 背景ファイル（画像・動画）が選ばれた時の処理
+        $('bg-file-input').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) {
+                $('sel-bg').value = '#00ff00'; changeBg('#00ff00'); return;
+            }
+            const url = URL.createObjectURL(file);
+            if (file.type.startsWith('video/')) {
+                bgImage = null;
+                bgVideo = document.createElement('video');
+                bgVideo.src = url;
+                bgVideo.loop = true;
+                bgVideo.muted = true;
+                bgVideo.playsInline = true;
+                bgVideo.play();
+            } else if (file.type.startsWith('image/')) {
+                bgVideo = null;
+                bgImage = new Image();
+                bgImage.src = url;
+            }
+        });
+
+        // 画面いっぱいに比率を保ってメディアを描画する補助関数
+        function drawBackgroundCover(ctx, media, w, h) {
+            const mw = media.videoWidth || media.width;
+            const mh = media.videoHeight || media.height;
+            if (!mw || !mh) return;
+            const scale = Math.max(w / mw, h / mh);
+            const dw = mw * scale;
+            const dh = mh * scale;
+            const dx = (w - dw) / 2;
+            const dy = (h - dh) / 2;
+            ctx.drawImage(media, dx, dy, dw, dh);
+        }
+window.openOBSWindow = function() {
+            const width = CANVAS_W;
+            const height = CANVAS_H;
+            const obsWindow = window.open("", "OBS_Output", `width=${width},height=${height}`);
+            
+            if (!obsWindow) {
+                alert("ポップアップがブロックされました。ブラウザの設定で許可してください。");
+                return;
+            }
+
+            const doc = obsWindow.document;
+            doc.title = "OBS Output Layer";
+            doc.body.style.margin = "0";
+            doc.body.style.padding = "0";
+            doc.body.style.overflow = "hidden";
+            doc.body.style.backgroundColor = currentBgColor === 'transparent' ? "#000" : currentBgColor;
+
+            const outCanvas = doc.createElement("canvas");
+            outCanvas.width = width;
+            outCanvas.height = height;
+            outCanvas.style.width = "100vw";
+            outCanvas.style.height = "100vh";
+            outCanvas.style.imageRendering = "pixelated"; // ドット絵対応
+            doc.body.appendChild(outCanvas);
+
+            const outCtx = outCanvas.getContext("2d");
+
+            // メインキャンバスの内容を毎フレームコピーする
+            function update() {
+                if (obsWindow.closed) return;
+                
+                // 背景色の同期
+                doc.body.style.backgroundColor = currentBgColor === 'transparent' ? "#000" : currentBgColor;
+                
+                outCtx.clearRect(0, 0, width, height);
+                outCtx.drawImage(mainCan, 0, 0);
+                obsWindow.requestAnimationFrame(update);
+            }
+            update();
+        };
+        // 録画の開始・停止切り替え
+        async function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        }
+        // --- 録画・エクスポート用の変数 ---
+        let recordFormat = 'mp4';
+        let exportFileName = '';
+        let recAudioStream = null, recAudioContext = null, recScriptProcessor = null;
+
+        // MP4用
+        let mp4Muxer = null, videoEncoder = null, audioEncoder = null;
+        let mp4VideoTimer = null, mp4AudioTimestamp = 0, mp4StartTime = 0;
+
+        // MP3用
+        let mp3Encoder = null, mp3Chunks = [];
+
+        function showToast(text) {
+            const toast = $('expression-toast');
+            if (!toast) return;
+            toast.textContent = text;
+            toast.style.opacity = 1;
+            // 既存のタイマーがあればクリアする
+            if (toast.hideTimer) clearTimeout(toast.hideTimer);
+            toast.hideTimer = setTimeout(() => { toast.style.opacity = 0; }, 2000);
+        }
+
+        async function startRecording() {
+            recordFormat = $('sel-record-format').value;
+            isRecording = true;
+            $('btn-record').textContent = "⏹ 録画停止・保存";
+            $('record-status').style.display = 'block';
+
+            try {
+                if (window.processedAudioStream) {
+                    recAudioStream = window.processedAudioStream;
+                } else if (window.sharedAudioStream) {
+                    recAudioStream = window.sharedAudioStream;
+                } else {
+                    recAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    window.sharedAudioStream = recAudioStream;
+                }
+
+                if (recordFormat === 'webm') {
+                    // ==========================================
+                    // 🎥 WebM 録画 (ブラウザ標準の MediaRecorder)
+                    // ==========================================
+                    recordedChunks = [];
+                    const videoStream = mainCan.captureStream(30);
+                    const combinedStream = new MediaStream([...videoStream.getVideoTracks(), ...recAudioStream.getAudioTracks()]);
+                    // ★修正: videoBitsPerSecond を 5Mbps に設定して高画質化
+                    mediaRecorder = new MediaRecorder(combinedStream, {
+                        mimeType: 'video/webm; codecs=vp9,opus',
+                        videoBitsPerSecond: 5_000_000
+                    });
+                    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+                    mediaRecorder.onstop = () => {
+                        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                        downloadBlob(blob, exportFileName);
+                    };
+                    mediaRecorder.start();
+
+                } else if (recordFormat === 'mp3') {
+                    // ==========================================
+                    // 🎵 MP3 録音 (lamejs エンコーダー)
+                    // ==========================================
+                    if (typeof lamejs === 'undefined') throw new Error("MP3ライブラリが見つかりません。");
+
+                    recAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const source = recAudioContext.createMediaStreamSource(recAudioStream);
+                    recScriptProcessor = recAudioContext.createScriptProcessor(4096, 1, 1);
+                    source.connect(recScriptProcessor);
+                    recScriptProcessor.connect(recAudioContext.destination);
+
+                    mp3Encoder = new lamejs.Mp3Encoder(1, recAudioContext.sampleRate, 128); // 128kbps モノラル
+                    mp3Chunks = [];
+
+                    recScriptProcessor.onaudioprocess = (e) => {
+                        if (!isRecording) return;
+                        const floatSamples = e.inputBuffer.getChannelData(0);
+                        const intSamples = new Int16Array(floatSamples.length);
+                        for (let i = 0; i < floatSamples.length; i++) {
+                            let s = Math.max(-1, Math.min(1, floatSamples[i]));
+                            intSamples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                        }
+                        const mp3buf = mp3Encoder.encodeBuffer(intSamples);
+                        if (mp3buf.length > 0) mp3Chunks.push(new Int8Array(mp3buf));
+                    };
+
+                } else if (recordFormat === 'mp4') {
+                    // ==========================================
+                    // 🎥 MP4 録画 (WebCodecs + Mp4Muxer)
+                    // ==========================================
+                    
+                    // 【追加】最終的な互換性チェック
+                    if (typeof VideoEncoder === 'undefined') {
+                        alert("お使いのブラウザはMP4の高画質録画に対応していません。WebM形式を選択してください。");
+                        stopRecording(true);
+                        return;
+                    }
+
+                    recAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    
+                    // --- 以下、既存のMP4録画ロジック ---
+                    mp4Muxer = new Mp4Muxer.Muxer({
+                        target: new Mp4Muxer.ArrayBufferTarget(),
+                        video: { 
+                            codec: 'avc', 
+                            width: CANVAS_W, 
+                            height: CANVAS_H 
+                        },
+                        audio: { 
+                            codec: 'aac', 
+                            sampleRate: recAudioContext.sampleRate, 
+                            numberOfChannels: 1 
+                        },
+                        fastStart: 'in-memory',
+                        firstTimestampBehavior: 'offset'
+                    });
+
+                    // 映像エンコーダー (H.264)
+                    videoEncoder = new VideoEncoder({
+                        output: (chunk, meta) => mp4Muxer.addVideoChunk(chunk, meta),
+                        error: e => console.error(e)
+                    });
+                    videoEncoder.configure({
+                        codec: 'avc1.42E01F', // Baselineプロファイル（より多くの端末で再生可能）
+                        width: CANVAS_W,
+                        height: CANVAS_H,
+                        bitrate: 5_000_000, // 8Mbpsから少し下げて5Mbpsに（安定性重視）
+                        framerate: 30
+                    });
+                    // 音声エンコーダー (AAC)
+                    audioEncoder = new AudioEncoder({
+                        output: (chunk, meta) => mp4Muxer.addAudioChunk(chunk, meta),
+                        error: e => console.error(e)
+                    });
+                    audioEncoder.configure({ codec: 'mp4a.40.2', sampleRate: recAudioContext.sampleRate, numberOfChannels: 1, bitrate: 128_000 });
+
+                    // マイク音声をエンコーダーに流し込む
+                    const source = recAudioContext.createMediaStreamSource(recAudioStream);
+                    recScriptProcessor = recAudioContext.createScriptProcessor(4096, 1, 1);
+                    source.connect(recScriptProcessor);
+                    recScriptProcessor.connect(recAudioContext.destination);
+
+                    mp4AudioTimestamp = 0;
+                    recScriptProcessor.onaudioprocess = (e) => {
+                        if (!isRecording) return;
+                        const floatSamples = e.inputBuffer.getChannelData(0);
+                        const audioData = new AudioData({
+                            format: 'f32-planar', sampleRate: recAudioContext.sampleRate, numberOfFrames: floatSamples.length,
+                            numberOfChannels: 1, timestamp: mp4AudioTimestamp, data: floatSamples
+                        });
+                        audioEncoder.encode(audioData);
+                        audioData.close();
+                        mp4AudioTimestamp += (floatSamples.length / recAudioContext.sampleRate) * 1_000_000; // マイクロ秒
+                    };
+
+                    // キャンバス映像をエンコーダーに流し込む
+                    mp4StartTime = performance.now();
+                    function sendVideoFrame() {
+                        if (!isRecording) return;
+                        const timestamp = (performance.now() - mp4StartTime) * 1000;
+                        const frame = new VideoFrame(mainCan, { timestamp });
+                        videoEncoder.encode(frame);
+                        frame.close();
+                        mp4VideoTimer = requestAnimationFrame(sendVideoFrame);
+                    }
+                    sendVideoFrame();
+                }
+
+            } catch (err) {
+                alert("録画開始エラー: " + err.message);
+                stopRecording(true); // エラー時は強制リセット
+            }
+        }
+
+        async function stopRecording(isError = false) {
+            isRecording = false;
+            $('btn-record').textContent = "⏺ 録画開始";
+            $('record-status').style.display = 'none';
+            if (isError) return;
+
+            // ★追加: 停止した瞬間にファイル名を聞く
+            let defaultName = recordFormat === 'mp3' ? `live2d_audio_${Date.now()}` : `live2d_record_${Date.now()}`;
+            let inputName = prompt("保存するファイル名を入力してください（拡張子不要）:", defaultName);
+            if (!inputName) inputName = defaultName; // キャンセルされたらデフォルト名
+            if (!inputName.endsWith('.' + recordFormat)) inputName += '.' + recordFormat; // 拡張子を自動付与
+
+            exportFileName = inputName; // 変数に記憶させる
+
+            if (recordFormat === 'webm' && mediaRecorder) {
+                mediaRecorder.stop();
+
+            } else if (recordFormat === 'mp3') {
+                if (recScriptProcessor) recScriptProcessor.disconnect();
+                if (recAudioContext) { recAudioContext.close(); recAudioContext = null; }
+
+                const mp3buf = mp3Encoder.flush();
+                if (mp3buf.length > 0) mp3Chunks.push(new Int8Array(mp3buf));
+                const blob = new Blob(mp3Chunks, { type: 'audio/mp3' });
+                // ★修正: exportFileName を使用
+                downloadBlob(blob, exportFileName);
+
+            } else if (recordFormat === 'mp4') {
+                cancelAnimationFrame(mp4VideoTimer);
+                if (recScriptProcessor) recScriptProcessor.disconnect();
+                if (recAudioContext) { recAudioContext.close(); recAudioContext = null; }
+
+                $('loading-overlay').style.display = 'flex';
+                $('loading-text').textContent = "MP4動画を作成中...";
+
+                try {
+                    await videoEncoder.flush();
+                    await audioEncoder.flush();
+                    mp4Muxer.finalize();
+                    const blob = new Blob([mp4Muxer.target.buffer], { type: 'video/mp4' });
+                    // ★修正: exportFileName を使用
+                    downloadBlob(blob, exportFileName);
+                } catch (e) {
+                    alert("MP4保存エラー: " + e.message);
+                } finally {
+                    $('loading-overlay').style.display = 'none';
+                }
+            }
+        }
+
+
+        // ファイルをダウンロードさせるための便利機能
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        // === 1. ファイル読み込み処理 (JSON & VRM) ===
+        $('file-input').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            handleFile(file);
+        });
+
+        let dragCounter = 0;
+        document.body.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; $('drop-overlay').style.display = 'flex'; });
+        document.body.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if (dragCounter === 0) $('drop-overlay').style.display = 'none'; });
+        document.body.addEventListener('dragover', (e) => { e.preventDefault(); });
+        document.body.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            $('drop-overlay').style.display = 'none';
+            const file = e.dataTransfer.files[0];
+            if (!file) return;
+            handleFile(file);
+        });
+
+        async function handleFile(file) {
+            if (isRecording) { alert("録画中はモデルを変更できません。"); return; }
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (ext === 'json') {
+                if ($('vrm-camera-group')) $('vrm-camera-group').style.display = 'none';
+                $('vrm-light-group').style.display = 'none';
+                if ($('vrm-expressions-group')) $('vrm-expressions-group').style.display = 'none'; // ★追加
+
+                const reader = new FileReader();
+                reader.onload = async (evt) => {
+                    try {
+                        const data = JSON.parse(evt.target.result);
+                        await loadCharacter(data);
+                        currentAppMode = '2d';
+                        $('status-text').textContent = `ドット絵読込完了 (${file.name})`;
+                    } catch (err) { alert("JSON読み込み失敗: " + err.message); }
+                };
+                reader.readAsText(file);
+            } else if (ext === 'vrm') {
+                if ($('vrm-camera-group')) $('vrm-camera-group').style.display = 'block';
+                $('vrm-light-group').style.display = 'block';
+                if ($('vrm-expressions-group')) $('vrm-expressions-group').style.display = 'block'; // ★追加
+
+                $('slider-light1-int').value = 150;
+                $('slider-light2-int').value = 100;
+                updateLight();
+                if ($('vrm-action-group')) $('vrm-action-group').style.display = 'block'; // 追加
+                await loadVRM(file);
+            } else if (ext === 'vrma') {
+                // ★追加: アニメーションファイルの処理
+                await loadVRMAnimation(file);
+            } else {
+                alert("対応していないファイルです（.json / .vrm / .vrma）");
+            }
+        }
+        function initVRMScene() {
+            if (vrmRenderer) return;
+            vrmCanvas.width = CANVAS_W;
+            vrmCanvas.height = CANVAS_H;
+            vrmRenderer = new window.THREE.WebGLRenderer({ canvas: vrmCanvas, alpha: true, antialias: true });
+            vrmRenderer.setSize(CANVAS_W, CANVAS_H);
+            vrmRenderer.outputColorSpace = window.THREE.SRGBColorSpace;
+
+            // ★修正: シャドウマップ（影の計算）を再び有効化
+            vrmRenderer.shadowMap.enabled = true;
+            vrmRenderer.shadowMap.type = window.THREE.PCFSoftShadowMap;
+
+            vrmScene = new window.THREE.Scene();
+            vrmCamera = new window.THREE.PerspectiveCamera(30, CANVAS_W / CANVAS_H, 0.1, 20.0);
+
+            vrmControls = new window.OrbitControls(vrmCamera, mainCan);
+            vrmControls.enableDamping = true;
+            vrmControls.dampingFactor = 0.05;
+            setVRMCamera('bustup');
+
+            // ★修正: 平行光源に影の設定を追加（これがないとのっぺりします）
+            vrmDirectionalLight = new window.THREE.DirectionalLight(0xffffff, 1.0);
+            vrmDirectionalLight.castShadow = true;
+            vrmDirectionalLight.shadow.camera.left = -2;
+            vrmDirectionalLight.shadow.camera.right = 2;
+            vrmDirectionalLight.shadow.camera.top = 2;
+            vrmDirectionalLight.shadow.camera.bottom = -2;
+            vrmDirectionalLight.shadow.mapSize.set(2048, 2048);
+            vrmDirectionalLight.shadow.bias = -0.0005;
+            vrmScene.add(vrmDirectionalLight);
+
+            // スポットライト(メイン)の準備
+            vrmSpotLight1 = new window.THREE.SpotLight(0xffffff, 1.5);
+            vrmSpotLight1.distance = 10.0;
+            vrmScene.add(vrmSpotLight1);
+            vrmScene.add(vrmSpotLight1.target);
+
+            // スポットライト(サブ)の準備
+            vrmSpotLight2 = new window.THREE.SpotLight(0x0055ff, 1.0);
+            vrmSpotLight2.distance = 10.0;
+            vrmScene.add(vrmSpotLight2);
+            vrmScene.add(vrmSpotLight2.target);
+
+            // 環境光の準備
+            vrmAmbientLight = new window.THREE.AmbientLight(0xffffff, 0.0);
+            vrmScene.add(vrmAmbientLight);
+
+            vrmClock = new window.THREE.Clock();
+
+            // 初回表示時にライトを適用
+            setTimeout(updateLight, 100);
+        }
+
+        let currentVRMUrl = null; 
+
+async function loadVRM(file) {
+    changeResolution($('sel-resolution').value);
+    initVRMScene();
+    $('loading-overlay').style.display = 'flex';
+    $('loading-text').textContent = "VRMモデルを準備中...";
+
+    // ★修正: 以前のURLがあれば解放する（メモリリーク対策）
+    if (currentVRMUrl) {
+        URL.revokeObjectURL(currentVRMUrl);
     }
+    currentVRMUrl = URL.createObjectURL(file);
+    const loader = new window.GLTFLoader();
+
+    // ★VRM 3.0 用のローダープラグイン登録
+    loader.register((parser) => new window.VRMLoaderPlugin(parser));
+
+    loader.load(currentVRMUrl, (gltf) => {
+                if (currentVrm) {
+                    currentVrm.scene.traverse((obj) => {
+                        if (obj.isMesh) {
+                            obj.geometry.dispose();
+                            if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+                            else obj.material.dispose();
+                        }
+                    });
+                    vrmScene.remove(currentVrm.scene);
+                }
+
+                currentVrm = gltf.userData.vrm;
+                window.VRMUtils.rotateVRM0(currentVrm);
+
+                const leftUpperArm = currentVrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+                const rightUpperArm = currentVrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+                if (leftUpperArm) leftUpperArm.rotation.z = 1.2;
+                if (rightUpperArm) rightUpperArm.rotation.z = -1.2;
+
+                const hips = currentVrm.humanoid.getNormalizedBoneNode('hips');
+                if (hips) {
+                    if (!currentVrm.userData) currentVrm.userData = {};
+                    currentVrm.userData.baseHipsY = hips.position.y;
+                }
+
+                currentVrm.scene.traverse(obj => {
+                    if (obj.isMesh) {
+                        obj.castShadow = true;
+                        obj.receiveShadow = true;
+                    }
+                });
+                vrmScene.add(currentVrm.scene);
+                currentVrm.scene.rotation.y = Math.PI;
+
+                buildExpressionUI(currentVrm);
+
+                // ★修正: ロード完了時に正しいカメラアングル（バストアップ）を設定する
+                setVRMCamera('bustup');
+
+                currentAppMode = 'vrm';
+                $('status-text').textContent = `VRM読込完了 (${file.name})`;
+                $('loading-overlay').style.display = 'none';
+
+                if (!window.isLooping) { window.isLooping = true; render(); }
+            }, undefined, (err) => {
+                console.error(err);
+                alert('VRMの読み込みに失敗しました');
+                $('loading-overlay').style.display = 'none';
+            });
+        }
+        async function loadCharacter(data) {
+            layers = [];
+            // ★修正: MP4録画のエンコードエラーを防ぐため、強制的に偶数にする
+            CANVAS_W = (data.width || 640) & ~1;
+            CANVAS_H = (data.height || 320) & ~1;
+            mainCan.width = CANVAS_W;
+            mainCan.height = CANVAS_H;
+
+            for (const lData of data.layers) {
+                const img = new Image();
+                await new Promise(resolve => {
+                    img.onload = resolve;
+                    img.src = lData.image;
+                });
+
+                layers.push({
+                    id: lData.id,
+                    name: lData.name,
+                    canvas: img, // 描画用Imageオブジェクト
+                    visible: lData.visible !== false,
+                    opacity: lData.opacity !== undefined ? lData.opacity : 1.0,
+                    blendMode: lData.blendMode || 'source-over',
+                    parentId: lData.parentId || null,
+                    anchor: lData.anchor || { x: CANVAS_W / 2, y: CANVAS_H / 2 },
+                    zOrder: lData.zOrder !== undefined ? lData.zOrder : 500,
+                    clipping: lData.clipping || false,
+                    keyframes: lData.keyframes || {}
+                });
+            }
+            if (!window.isLooping) { window.isLooping = true; render(); }
+        }
+
+        // === 2. カメラ・顔認識ロジック ===
+// === 2. カメラ・顔認識・ポーズロジック ===
+        let poseLandmarker, handLandmarker; 
+        let isInitializingAI = false; 
+        let handState = { leftGrip: 0, rightGrip: 0 }; // 0:パー, 1:グー
+
+        async function initFaceLandmarker() { // 互換性のため関数名は維持
+            if (isInitializingAI) return; 
+            isInitializingAI = true;
+            $('loading-overlay').style.display = 'flex';
+            $('loading-text').textContent = "AIモデル（顔・体・手）を準備中...";
+            
+            try {
+                const filesetResolver = await window.FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+                );
+                
+                // 顔・姿勢・手の3つのAIモデルを並行ロード
+                const [face, pose, hand] = await Promise.all([
+                    window.FaceLandmarker.createFromOptions(filesetResolver, {
+                        baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task`, delegate: "GPU" },
+                        outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true, runningMode: "VIDEO", numFaces: 1
+                    }),
+                    window.PoseLandmarker.createFromOptions(filesetResolver, {
+                        baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task`, delegate: "GPU" },
+                        runningMode: "VIDEO", numPoses: 1
+                    }),
+                    window.HandLandmarker.createFromOptions(filesetResolver, {
+                        baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task`, delegate: "GPU" },
+                        runningMode: "VIDEO", numHands: 2
+                    })
+                ]);
+
+                faceLandmarker = face;
+                poseLandmarker = pose;
+                handLandmarker = hand;
+            } catch (error) {
+                console.error("AIモデルの読み込みエラー:", error);
+                alert("カメラAIの準備に失敗しました。");
+            } finally {
+                $('loading-overlay').style.display = 'none';
+                isInitializingAI = false;
+            }
+        }
+
+let frameSkipCounter = 0; // ★追加: フレームスキップ用
+
+function processVideo() {
+    if (!isCameraActive) return;
+    
+    if (video.readyState >= 2 && video.videoWidth > 0 && video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        const now = performance.now();
+        
+        try {
+            // 顔は常に推論（軽量）
+            const faceResults = faceLandmarker.detectForVideo(video, now);
+            if (faceResults.faceBlendshapes?.length > 0) mapFaceData(faceResults);
+
+            // ★修正: 姿勢と手は重いので、チェックボックスがONの時、かつ1フレーム飛ばしで処理
+            frameSkipCounter++;
+            if (frameSkipCounter % 2 === 0) {
+                if ($('chk-ai-pose').checked && (currentCameraMode === 'bustup' || currentCameraMode === 'fullbody')) {
+                    const poseResults = poseLandmarker.detectForVideo(video, now);
+                    if (poseResults.worldLandmarks?.length > 0) mapPoseData(poseResults.worldLandmarks[0]);
+                }
+                
+                if ($('chk-ai-hand').checked && (currentCameraMode === 'bustup' || currentCameraMode === 'fullbody')) {
+                    const handResults = handLandmarker.detectForVideo(video, now);
+                    if (handResults.landmarks?.length > 0) mapHandData(handResults);
+                }
+            }
+        } catch (err) { 
+            console.error("AI検出エラー:", err); 
+        }
+    }
+    requestAnimationFrame(processVideo);
+}
+        function mapHandData(results) {
+            handState.leftGrip = 0; handState.rightGrip = 0;
+
+            for (let i = 0; i < results.handednesses.length; i++) {
+                const isRight = results.handednesses[i][0].categoryName === "Right"; // カメラ反転により左右逆転
+                const lm = results.landmarks[i];
+
+                // 簡易「グー・パー」判定 (手首〜中指先 の距離 / 手首〜中指付け根 の距離)
+                const distDistal = Math.hypot(lm[12].x - lm[0].x, lm[12].y - lm[0].y);
+                const distBase = Math.hypot(lm[9].x - lm[0].x, lm[9].y - lm[0].y);
+                
+                const gripRatio = distDistal / distBase;
+                let gripVal = 0; // 0=パー, 1=グー
+                if (gripRatio < 1.2) gripVal = 1; // 完全に握っている
+                else if (gripRatio < 1.8) gripVal = (1.8 - gripRatio) / 0.6; // 中間
+
+                if (isRight) handState.leftGrip = gripVal; // 鏡合わせのため逆
+                else handState.rightGrip = gripVal;
+            }
+        }
+
+        function mapPoseData(landmarks) {
+            if (!landmarks[11] || !landmarks[12] || !landmarks[15] || !landmarks[16]) return;
+
+            const ls = landmarks[11], le = landmarks[13], lw = landmarks[15];
+            const rs = landmarks[12], re = landmarks[14], rw = landmarks[16];
+            const lh = landmarks[23], lk = landmarks[25], rh = landmarks[24], rk = landmarks[26];
+
+            poseData.lVis = (lw.visibility > 0.5 && ls.visibility > 0.5);
+            poseData.rVis = (rw.visibility > 0.5 && rs.visibility > 0.5);
+            poseData.legVis = (lh && lk && rh && rk && lk.visibility > 0.5 && rk.visibility > 0.5);
+
+            // ★修正: 3Dベクトルに基づく角度計算（腕の突き出し・奥行き対応）
+            if (poseData.lVis) {
+                const lArmDx = le.x - ls.x; const lArmDy = le.y - ls.y; const lArmDz = le.z - ls.z;
+                poseData.lArm = Math.atan2(lArmDy, lArmDx) + Math.PI / 2; // 横振り
+                poseData.lArmX = Math.atan2(lArmDz, Math.abs(lArmDy)) * -1.8; // ★前突き出し(X回転)
+
+                const lForeDx = lw.x - le.x; const lForeDy = lw.y - le.y; const lForeDz = lw.z - le.z;
+                poseData.lFore = Math.atan2(lForeDy, lForeDx) - Math.atan2(lArmDy, lArmDx);
+                poseData.lForeX = Math.atan2(lForeDz, Math.abs(lForeDy)) * -1.8;
+            }
+            if (poseData.rVis) {
+                const rArmDx = re.x - rs.x; const rArmDy = re.y - rs.y; const rArmDz = re.z - rs.z;
+                poseData.rArm = Math.atan2(rArmDy, rArmDx) - Math.PI / 2; 
+                poseData.rArmX = Math.atan2(rArmDz, Math.abs(rArmDy)) * -1.8; 
+
+                const rForeDx = rw.x - re.x; const rForeDy = rw.y - re.y; const rForeDz = rw.z - re.z;
+                poseData.rFore = Math.atan2(rForeDy, rForeDx) - Math.atan2(rArmDy, rArmDx);
+                poseData.rForeX = Math.atan2(rForeDz, Math.abs(rForeDy)) * -1.8;
+            }
+            if (currentCameraMode === 'fullbody' && poseData.legVis) {
+                poseData.lLeg = Math.atan2(lk.y - lh.y, lk.x - lh.x) - Math.PI / 2;
+                poseData.rLeg = Math.atan2(rk.y - rh.y, rk.x - rh.x) - Math.PI / 2;
+            }
+        }
+
+        async function toggleCamera() {
+            if (isCameraActive) {
+                isCameraActive = false;
+                $('btn-camera').textContent = "🎥 カメラ起動";
+                $('btn-camera').className = "btn-secondary";
+                if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+                video.style.display = "none"; // ★追加：停止時は隠す
+                return;
+            }
+
+            if (!faceLandmarker) await initFaceLandmarker();
+            if (!audioContext) initMic();
+            video = $('video-preview');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: currentFacingMode,
+                        width: { ideal: 640 }, // ★追加: AI推論の負荷軽減のため解像度を抑える
+                        height: { ideal: 480 }
+                    }
+                });
+                video.srcObject = stream;
+                isCameraActive = true;
+
+                // ★追加：カメラが有効になったらプレビューを表示する
+                // ただし、もし既にSpaceキーでUIを隠しているなら表示しない
+                const isUIHidden = $('ui-panel').classList.contains('hidden');
+                video.style.display = isUIHidden ? "none" : "block";
+
+                $('btn-camera').textContent = "🛑 カメラ停止";
+                $('btn-camera').className = "btn-secondary";
+                processVideo();
+            } catch (err) {
+                alert("カメラの起動に失敗しました。");
+            }
+        }
+        let isMicOnlyActive = false;
+        async function toggleMicOnly() {
+            if (isMicOnlyActive) {
+                // 停止処理
+                isMicOnlyActive = false;
+                $('btn-mic-only').textContent = "🎤 マイクのみ";
+                $('btn-mic-only').className = "btn-secondary";
+
+                if (window.sharedAudioStream) {
+                    window.sharedAudioStream.getTracks().forEach(t => t.stop());
+                    window.sharedAudioStream = null;
+                }
+                if (audioContext) {
+                    await audioContext.close();
+                    audioContext = null;
+                }
+                micLevel = 0; // 口パクを止める
+                return;
+            }
+
+            // 起動処理
+            $('btn-mic-only').textContent = "⏳ 準備中...";
+            try {
+                await initMic();
+                isMicOnlyActive = true;
+                $('btn-mic-only').textContent = "🛑 マイク停止";
+                $('btn-mic-only').style.background = "#dc3545"; // 赤色にして稼働中をアピール
+                $('btn-mic-only').style.color = "white";
+            } catch (err) {
+                alert("マイクの起動に失敗しました。権限を確認してください。");
+                $('btn-mic-only').textContent = "🎤 マイクのみ";
+            }
+        }
+        async function switchCamera() {
+    if (!isCameraActive) return;
+    if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+
+    currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: currentFacingMode,
+                width: { ideal: 640 },
+                height: { ideal: 480 }
+            }
+        });
+        video.srcObject = stream;
+        
+        // ★修正: 内カメラ(user)なら反転、外カメラ(environment)なら反転解除
+        if (currentFacingMode === "user") {
+            video.style.transform = "scaleX(-1)";
+        } else {
+            video.style.transform = "none";
+        }
+        
+    } catch (err) {
+        alert("カメラの切り替えに失敗しました。");
+    }
+}
+        function mapFaceData(results) {
+            const shapes = results.faceBlendshapes[0].categories;
+            const matrix = results.facialTransformationMatrixes[0].data;
+
+            const sensitivity = parseInt($('slider-sens').value) / 100;
+            const smooth = parseInt($('slider-smooth').value) / 100;
+            const isMirror = $('chk-mirror').checked;
+
+            const find = (name) => shapes.find(c => c.categoryName === name).score;
+
+            let rotX = Math.asin(-matrix[6]) * (180 / Math.PI) * sensitivity * 4;
+            let rotY = Math.asin(matrix[2]) * (180 / Math.PI) * sensitivity * 4;
+            let rotZ = Math.atan2(matrix[1], matrix[0]) * (180 / Math.PI) * sensitivity;
+
+            let eyeL = find('eyeBlinkLeft');
+            let eyeR = find('eyeBlinkRight');
+            let mouth = find('jawOpen');
+            let mouthPucker = find('mouthPucker');
+            let mouthSmile = (find('mouthSmileLeft') + find('mouthSmileRight')) / 2;
+
+            // ★追加: 目・口のロック設定がONなら強制的に0(デフォルト)にする
+            if ($('chk-lock-eye').checked) { eyeL = 0; eyeR = 0; }
+            if ($('chk-lock-mouth').checked) { mouth = 0; mouthPucker = 0; mouthSmile = 0; }
+
+            if (isMirror) {
+                rotY = -rotY;
+                rotZ = -rotZ;
+                const tempEye = eyeL; eyeL = eyeR; eyeR = tempEye;
+            }
+
+            const lerp = (cur, target) => cur + (target - cur) * (1 - smooth);
+            lastRawRot = { x: rotX, y: rotY, z: rotZ };
+
+            const finalX = rotX - faceOffset.angleX;
+            const finalY = rotY - faceOffset.angleY;
+            const finalZ = rotZ - faceOffset.angleZ;
+
+            live2dParams.angleX = lerp(live2dParams.angleX, Math.max(-100, Math.min(100, finalX)));
+            live2dParams.angleY = lerp(live2dParams.angleY, Math.max(-100, Math.min(100, -finalY)));
+            live2dParams.angleZ = lerp(live2dParams.angleZ, Math.max(-100, Math.min(100, finalZ)));
+            live2dParams.eyeL = lerp(live2dParams.eyeL, eyeL * -100);
+            live2dParams.eyeR = lerp(live2dParams.eyeR, eyeR * -100);
+            live2dParams.mouth = lerp(live2dParams.mouth, mouth * 100);
+
+            // ★追加: AI口パクの補間
+            live2dParams.aiA = lerp(live2dParams.aiA, mouth);
+            live2dParams.aiI = lerp(live2dParams.aiI, mouthSmile);
+            live2dParams.aiU = lerp(live2dParams.aiU, mouthPucker);
+        }
+
+        // === 3. レンダリングエンジン (エディタから移植) ===
+        function getInterpolatedState(keys, val) {
+            if (keys.length === 1) return keys[0].state;
+            if (val <= keys[0].val) return keys[0].state;
+            if (val >= keys[keys.length - 1].val) return keys[keys.length - 1].state;
+            let k0, k1;
+            for (let i = 0; i < keys.length - 1; i++) {
+                if (val >= keys[i].val && val <= keys[i + 1].val) {
+                    k0 = keys[i]; k1 = keys[i + 1]; break;
+                }
+            }
+            const t = (val - k0.val) / (k1.val - k0.val);
+            const s0 = k0.state, s1 = k1.state;
+            let res = Object.assign({}, s0);
+            ['x', 'y', 'angle', 'scaleX', 'scaleY', 'anchorX', 'anchorY'].forEach(p => {
+                res[p] = s0[p] + (s1[p] - s0[p]) * t;
+            });
+            res.opacity = (s0.opacity || 1.0) + ((s1.opacity || 1.0) - (s0.opacity || 1.0)) * t;
+            if (s0.isFree && s1.isFree && s0.freePoints) {
+                res.freePoints = s0.freePoints.map((p, i) => ({
+                    x: p.x + (s1.freePoints[i].x - p.x) * t,
+                    y: p.y + (s1.freePoints[i].y - p.y) * t
+                }));
+            }
+            return res;
+        }
+        function getLayerCombinedState(layer, currentParams) {
+            if (!layer.keyframes) return null;
+            let combinedDelta = { x: 0, y: 0, angle: 0, scaleX: 0, scaleY: 0, anchorX: 0, anchorY: 0, opacity: 0 };
+            let baseState = null, combinedFree = null;
+            let hasAny = false;
+
+            // ★修正: live2dParams の直参照をやめ、引数から受け取る
+            for (let p in currentParams) {
+                const keys = layer.keyframes[p];
+                if (keys && keys.length > 0) {
+                    const s0 = getInterpolatedState(keys, 0);
+                    const sv = getInterpolatedState(keys, currentParams[p]);
+                    if (!baseState) baseState = s0;
+                    hasAny = true;
+                    combinedDelta.x += (sv.x - s0.x);
+                    combinedDelta.y += (sv.y - s0.y);
+                    combinedDelta.angle += (sv.angle - s0.angle);
+                    combinedDelta.scaleX += (sv.scaleX - s0.scaleX);
+                    combinedDelta.scaleY += (sv.scaleY - s0.scaleY);
+                    combinedDelta.anchorX += (sv.anchorX - s0.anchorX);
+                    combinedDelta.anchorY += (sv.anchorY - s0.anchorY);
+                    combinedDelta.opacity += ((sv.opacity || 1) - (s0.opacity || 1));
+                    if (s0.isFree && sv.isFree) {
+                        if (!combinedFree) combinedFree = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }];
+                        for (let i = 0; i < 4; i++) {
+                            combinedFree[i].x += (sv.freePoints[i].x - s0.freePoints[i].x);
+                            combinedFree[i].y += (sv.freePoints[i].y - s0.freePoints[i].y);
+                        }
+                    }
+                }
+            }
+            if (!hasAny) return null;
+            let res = Object.assign({}, baseState);['x', 'y', 'angle', 'scaleX', 'scaleY', 'anchorX', 'anchorY'].forEach(p => res[p] += combinedDelta[p]);
+            res.opacity = Math.max(0, Math.min(1, (baseState.opacity || 1) + combinedDelta.opacity));
+            if (baseState.isFree && combinedFree) {
+                res.freePoints = baseState.freePoints.map((p, i) => ({ x: p.x + combinedFree[i].x, y: p.y + combinedFree[i].y }));
+            }
+            return res;
+        }
+
+        function render() {
+            // ★追加: 物理演算（揺れもの）の計算
+            // 顔の角度(target)に向かって、バネの力で引っ張る計算
+            const spring = 0.1;   // バネの強さ（弾力）
+            const damp = 0.8;     // 減衰（揺れの収まりやすさ）
+
+            physicsState.vx += (live2dParams.angleX - physicsState.x) * spring;
+            physicsState.vy += (live2dParams.angleY - physicsState.y) * spring;
+            physicsState.vx *= damp;
+            physicsState.vy *= damp;
+            physicsState.x += physicsState.vx;
+            physicsState.y += physicsState.vy;
+
+            let finalParams = Object.assign({}, live2dParams);
+            let motionOffset = getAutoMotionsOffset();
+
+            for (let key in finalParams) {
+                finalParams[key] += (motionOffset[key] || 0) + (expressionOffset[key] || 0);
+            }
+
+            // ★追加: 揺れものパラメータを finalParams にセット
+            // 顔の角度との「差分（遅れ）」を揺れ幅として渡す
+            finalParams.physicsX = physicsState.x - live2dParams.angleX;
+            finalParams.physicsY = physicsState.y - live2dParams.angleY;
+
+            // まばたきのクランプ
+            finalParams.eyeL = Math.min(finalParams.eyeL, motionOffset.eyeL || 0);
+            finalParams.eyeR = Math.min(finalParams.eyeR, motionOffset.eyeR || 0);
+            finalParams.mouth = Math.max(finalParams.mouth, motionOffset.mouth || 0);
+
+            ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+            if (currentBgColor !== 'transparent') {
+                ctx.fillStyle = currentBgColor;
+                ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+            }
+            if (bgVideo && bgVideo.readyState >= 2) {
+                drawBackgroundCover(ctx, bgVideo, CANVAS_W, CANVAS_H);
+            } else if (bgImage && bgImage.complete) {
+                drawBackgroundCover(ctx, bgImage, CANVAS_W, CANVAS_H);
+            }
+            if (currentAppMode === 'vrm' && currentVrm) {
+                let deltaTime = vrmClock.getDelta();
+                deltaTime = Math.min(deltaTime, 0.1);
+                if (vrmControls) vrmControls.update(); // カメラの滑らかな移動を更新
+
+                const humanoid = currentVrm.humanoid;
+                const head = humanoid.getNormalizedBoneNode('head');
+                const neck = humanoid.getNormalizedBoneNode('neck');
+                const spine = humanoid.getNormalizedBoneNode('spine');
+                const chest = humanoid.getNormalizedBoneNode('upperChest') || humanoid.getNormalizedBoneNode('chest');
+                const hips = humanoid.getNormalizedBoneNode('hips');
+                const lArm = humanoid.getNormalizedBoneNode('leftUpperArm');
+                const rArm = humanoid.getNormalizedBoneNode('rightUpperArm');
+
+                const radZ = -finalParams.angleZ * 0.015;
+                const radY = -finalParams.angleY * 0.015;
+                const radX = finalParams.angleX * 0.015;
+
+                // 1. 首・胸・背骨の連動 (モード別に同期部位を制限)
+                if (currentCameraMode === 'face') {
+                    if (head) head.rotation.set(radX * 0.5, radY * 0.5, radZ * 0.5);
+                    if (neck) neck.rotation.set(radX * 0.2, radY * 0.2, radZ * 0.2);
+                    if (chest) chest.rotation.set(0, 0, 0);
+                    if (spine) spine.rotation.set(0, 0, 0);
+                } else {
+                    if (head) head.rotation.set(radX * 0.5, radY * 0.5, radZ * 0.5);
+                    if (neck) neck.rotation.set(radX * 0.2, radY * 0.2, radZ * 0.2);
+                    if (chest) chest.rotation.set(radX * 0.15, radY * 0.15, radZ * 0.15);
+                    if (spine) spine.rotation.set(radX * 0.15, radY * 0.15, radZ * 0.15);
+                }// 2. 腕と足の同期ロジック
+                const now = Date.now();
+                if (vrmMixer && isAnimationPlaying) {
+                    vrmMixer.update(deltaTime);
+                }
+
+                if (hips && currentVrm.userData.baseHipsY !== undefined) {
+                    let targetHipsX = 0;
+                    let targetHipsY = currentVrm.userData.baseHipsY;
+
+                    if ($('chk-breathing').checked) {
+                        targetHipsY += Math.sin(now / 800) * 0.015;
+                        targetHipsX = radZ * -0.15;
+                    }
+                    hips.position.x += (targetHipsX - hips.position.x) * 0.1;
+                    hips.position.y += (targetHipsY - hips.position.y) * 0.1;
+
+                    if (!isAnimationPlaying) {
+                        const lArm = humanoid.getNormalizedBoneNode('leftUpperArm');
+                        const rArm = humanoid.getNormalizedBoneNode('rightUpperArm');
+                        const lFore = humanoid.getNormalizedBoneNode('leftLowerArm');
+                        const rFore = humanoid.getNormalizedBoneNode('rightLowerArm');
+                        const lLeg = humanoid.getNormalizedBoneNode('leftUpperLeg');
+                        const rLeg = humanoid.getNormalizedBoneNode('rightUpperLeg');
+                        // ① 目標値：【通常状態】を以前の「腕を下ろした正しい状態」に完全復旧
+                        let tgt = {
+    lArm: 1.2, rArm: -1.2, lFore: 0, rFore: 0,
+    lLeg: 0, rLeg: 0, lArmX: 0, rArmX: 0, lArmY: 0, rArmY: 0,
+    lForeX: 0, lForeY: 0, rForeX: 0, rForeY: 0,
+    lHandX: 0, lHandY: 0, lHandZ: 0,
+    rHandX: 0, rHandY: 0, rHandZ: 0
 };
-</script>
+                        const mirror = $('chk-mirror').checked ? -1 : 1;
+
+
+                        if (activePresetPose === 'wave') {
+                            // 1. 右上腕：腕を横に上げて、少し前に出す
+                            tgt.rArm = -1.1; 
+                            tgt.rArmX = 0.3;
+                            tgt.rArmY = 0;
+
+                            // 2. 右前腕（肘）：深く曲げて手をおでこの高さにする
+                            tgt.rFore = -1.8; 
+
+                            // 3. 右前腕のひねり：★90度ひねって手のひらを正面（カメラ）に向ける
+                            tgt.rForeX = 1.57; 
+
+                            // 4. 右前腕の左右：★ここを揺らして「バイバイ」させる
+                             tgt.rForeY = (Math.sin(now / 150) * 0.5)+1.8;
+tgt.rHandZ = 1;
+    tgt.rHandX = -0.5;
+                            // 左手は自然に下ろす
+                            tgt.lArm = 1.2;
+                        } else if (activePresetPose === 'star') {
+                            // ★大の字は完成されているので一切手を加えない（絶対維持）
+                            tgt.lArm = -0.3;
+                            tgt.rArm = 0.3;
+                            tgt.lArmX = 0.2;
+                            tgt.rArmX = 0.2;
+                            tgt.lLeg = -0.5;
+                            tgt.rLeg = 0.5;
+                        } else if (activePresetPose === 'armsFolded') {
+                            // ★腕を組む：左右の奥行きと高さをずらして貫通回避！
+
+                            // 右腕（カメラ側・上側）
+                            tgt.rArm = -1.3;      // 少し浅く上げる（左腕より高く）
+                            tgt.rArmX = 1.1;      // ★1.1：左腕よりさらに「前」へ
+                            tgt.rArmY = 0.1;
+                            tgt.rFore = -2.1;
+
+                            // 左腕（体側・下側）
+                            tgt.lArm = 1.6;       // 少し深く下げる（右腕より低く）
+                            tgt.lArmX = 0.7;      // ★0.7：右腕より「手前（体寄り）」へ
+                            tgt.lArmY = -0.1;
+                            tgt.lFore = 2.3;      // 右腕の下をくぐらせるために深く曲げる
+
+                            // 手首の回転
+                            tgt.rHandY = 3.14;
+                            tgt.lHandY = -3.14;
+                        }
+
+                        // ④ 吸い込みスムージング（手首 HandY の更新を追加）
+                        const lerp = 0.12;
+                        const props = [
+    'lArm', 'rArm', 'lArmX', 'rArmX', 'lArmY', 'rArmY',
+    'lFore', 'rFore', 'lForeX', 'rForeX', 'lForeY', 'rForeY',
+    'lHandX', 'lHandY', 'lHandZ', 'rHandX', 'rHandY', 'rHandZ', // ★手首の全軸を追加
+    'lLeg', 'rLeg'
+];
+                        props.forEach(p => {
+                            if (smoothPose[p] === undefined) smoothPose[p] = 0;
+                            const targetVal = tgt[p] !== undefined ? tgt[p] : 0; // ★ここを修正（安全策）
+                            smoothPose[p] += (targetVal - smoothPose[p]) * lerp;
+                        });
+
+                        // ⑤ 適用
+                        const lHand = humanoid.getNormalizedBoneNode('leftHand');
+const rHand = humanoid.getNormalizedBoneNode('rightHand');
+
+if (lHand) {
+    lHand.rotation.set(
+        smoothPose.lHandX || 0,
+        smoothPose.lHandY || 0,
+        smoothPose.lHandZ || 0
+    );
+}
+if (rHand) {
+    rHand.rotation.set(
+        smoothPose.rHandX || 0,
+        smoothPose.rHandY || 0,
+        smoothPose.rHandZ || 0
+    );
+}
+
+                        if (lArm) lArm.rotation.set(smoothPose.lArmX, smoothPose.lArmY, smoothPose.lArm);
+                        if (rArm) rArm.rotation.set(smoothPose.rArmX, smoothPose.rArmY, smoothPose.rArm);
+                        if (lFore) lFore.rotation.set(smoothPose.lForeX || 0, smoothPose.lForeY || 0, smoothPose.lFore);
+                        if (rFore) rFore.rotation.set(smoothPose.rForeX || 0, smoothPose.rForeY || 0, smoothPose.rFore);
+
+                        // ★手首の回転（180度フリップ）を適用
+                        if (lHand) lHand.rotation.set(smoothPose.lHandX || 0, smoothPose.lHandY || 0, smoothPose.lHandZ || 0);
+if (rHand) rHand.rotation.set(smoothPose.rHandX || 0, smoothPose.rHandY || 0, smoothPose.rHandZ || 0);
+
+                        if (lLeg) lLeg.rotation.set(0, 0, smoothPose.lLeg);
+                        if (rLeg) rLeg.rotation.set(0, 0, smoothPose.rLeg);
+
+                        // ⑥ 呼吸と遠心力の揺れ
+                        const swayX = radX * 0.3;
+                        const swayY = radY * 0.3;
+                        const breathing = Math.sin(now / 800) * 0.02;
+
+                        if (lArm && activePresetPose !== 'star') { lArm.rotation.z += breathing; lArm.rotation.x += swayX; lArm.rotation.y += -swayY; }
+                        if (rArm && activePresetPose !== 'star' && activePresetPose !== 'wave') { rArm.rotation.z -= breathing; rArm.rotation.x += swayX; rArm.rotation.y += swayY; }
+                    }
+
+                }
+                // 3. 【リアル・リップシンク】と表情制御
+                const exp = currentVrm.expressionManager;
+                if (exp) {
+                    let bL = Math.max(0, finalParams.eyeL / -100);
+                    let bR = Math.max(0, finalParams.eyeR / -100);
+                    if (bL < 0.2) bL = 0; if (bR < 0.2) bR = 0;
+
+                    exp.setValue('blinkLeft', bL);
+                    exp.setValue('blinkRight', bR);
+
+                    const micSens = parseInt($('slider-mic-sens').value) / 100;
+                    let targetA = 0, targetI = 0, targetU = 0;
+
+                    if (micSens > 0) {
+                        let vol = Math.min(1.0, micLevel / 100);
+                        let rawA = live2dParams.aiA || 0;
+                        let rawI = live2dParams.aiI || 0;
+                        let rawU = live2dParams.aiU || 0;
+
+                        if (vol < 0.05) {
+                            // ★修正: マイクの音量が無いときは、カメラ(AI)の口パクを反映させる！
+                            targetA = rawA;
+                            targetI = rawI;
+                            targetU = rawU * 1.5;
+                        } else {
+                            if (rawA + rawI + rawU < 0.1) {
+                                targetA = vol;
+                            } else {
+                                const totalShape = rawA + rawI + rawU;
+                                targetA = vol * (rawA / totalShape);
+                                targetI = vol * (rawI / totalShape) * 1.2;
+                                targetU = vol * (rawU / totalShape) * 1.5;
+                            }
+                        }
+                    } else {
+                        targetA = live2dParams.aiA;
+                        targetI = live2dParams.aiI;
+                        targetU = live2dParams.aiU * 1.5;
+                    }
+
+                    // 痙攣（ブレ）防止のスムージング処理
+                    const openSpeed = 0.6;
+                    const closeSpeed = 0.3;
+                    smoothMouth.aa += (targetA - smoothMouth.aa) * (targetA > smoothMouth.aa ? openSpeed : closeSpeed);
+                    smoothMouth.ih += (targetI - smoothMouth.ih) * (targetI > smoothMouth.ih ? openSpeed : closeSpeed);
+                    smoothMouth.ou += (targetU - smoothMouth.ou) * (targetU > smoothMouth.ou ? openSpeed : closeSpeed);
+
+                    exp.setValue('aa', smoothMouth.aa);
+                    exp.setValue('ih', smoothMouth.ih);
+                    exp.setValue('ou', smoothMouth.ou);
+
+                    for (const [name, val] of Object.entries(manualExpressions)) {
+                        exp.setValue(name, val);
+                    }
+
+                    // ★2Dモデル互換の簡易感情（レガシー対策）
+                    if (expressionOffset.angleZ > 0) exp.setValue('angry', 1);
+                    if (expressionOffset.eyeL < 0) exp.setValue('surprised', 1);
+                    if (expressionOffset.mouth > 0) exp.setValue('happy', 1);
+                    if (expressionOffset.opacity < 0) exp.setValue('relaxed', 1);
+
+                    // ★動的割り当てされたVRM感情の直接適用
+                    if (activeVRMEmotion !== '') {
+                        exp.setValue(activeVRMEmotion, 1.0);
+                    }
+                    let eAngry = (activeVRMEmotion === 'angry' || expressionOffset.angleZ > 0) ? 1 : 0;
+                    let eSurp = (activeVRMEmotion === 'surprised' || expressionOffset.eyeL < 0) ? 1 : 0;
+                    let eHappy = (activeVRMEmotion === 'happy' || expressionOffset.mouth > 0) ? 1 : 0;
+                    // ★修正: activeVRMEmotion === 'sad' を外して重複適用を防ぐ
+                    let eRelax = (activeVRMEmotion === 'relaxed' || expressionOffset.opacity < 0) ? 1 : 0;
+
+                    exp.setValue('angry', eAngry);
+                    exp.setValue('surprised', eSurp);
+                    exp.setValue('happy', eHappy);
+                    exp.setValue('relaxed', eRelax);
+                    if (activeVRMEmotion === 'sad') exp.setValue('sad', 1);
+                }
+
+                if (currentVrm && currentVrm.scene) {
+                    currentVrm.update(deltaTime);
+                    vrmRenderer.render(vrmScene, vrmCamera);
+                }
+                ctx.drawImage(vrmCanvas, 0, 0, CANVAS_W, CANVAS_H);
+
+                requestAnimationFrame(render);
+                return;
+            }
+            let renderList = layers.map((layer, index) => {
+                const mState = getLayerCombinedState(layer, finalParams); // ★合成したパラメータを渡す
+                return { layer, mState, z: mState && mState.zOrder !== undefined ? mState.zOrder : (layer.zOrder || index * 10) };
+            }).sort((a, b) => a.z - b.z);
+
+            renderList.forEach(item => {
+                const layer = item.layer;
+                if (layer.visCond && layer.visCond.param !== 'always') {
+                    const currentVal = finalParams[layer.visCond.param] || 0;
+                    const targetVal = layer.visCond.val;
+                    if (layer.visCond.comp === 'gt' && !(currentVal > targetVal)) return;
+                    if (layer.visCond.comp === 'lt' && !(currentVal < targetVal)) return;
+                }
+                if (!layer.visible) return;
+                ctx.save();
+                ctx.globalAlpha = item.mState ? item.mState.opacity : layer.opacity;
+                ctx.globalCompositeOperation = layer.clipping ? 'source-atop' : layer.blendMode;
+
+                // 親子の連動
+                let current = layer;
+                let ancestors = [];
+                while (current.parentId) {
+                    let p = layers.find(l => l.id === current.parentId);
+                    if (p) { ancestors.unshift(p); current = p; } else break;
+                }
+                ancestors.forEach(parent => {
+                    const ps = getLayerCombinedState(parent, finalParams);
+                    if (ps) {
+                        const adx = ps.anchorX - parent.anchor.x;
+                        const ady = ps.anchorY - parent.anchor.y;
+                        ctx.translate(adx, ady);
+                        ctx.translate(parent.anchor.x, parent.anchor.y);
+                        ctx.rotate(ps.angle);
+                        ctx.scale(ps.scaleX, ps.scaleY);
+                        ctx.translate(-parent.anchor.x, -parent.anchor.y);
+                    }
+                });
+
+                if (item.mState) {
+                    const s = item.mState;
+                    ctx.translate(s.anchorX, s.anchorY);
+                    ctx.rotate(s.angle);
+                    ctx.scale(s.scaleX, s.scaleY);
+                    if (s.isFree && s.freePoints) {
+                        ctx.restore(); ctx.save();
+                        if (layer.clipping) ctx.globalCompositeOperation = 'source-atop';
+                        drawFreeTransform(ctx, layer.canvas, s.freePoints);
+                    } else {
+                        ctx.drawImage(layer.canvas, s.x - s.anchorX, s.y - s.anchorY);
+                    }
+                } else {
+                    ctx.drawImage(layer.canvas, 0, 0);
+                }
+                ctx.restore();
+            });
+            requestAnimationFrame(render);
+        }
+
+        // ★追加: ランダムな視線移動のためのタイマー変数
+        let randomGazeX = 0;
+        let randomGazeY = 0;
+        let gazeTimer = 0;
+
+        function getAutoMotionsOffset() {
+            let offset = { angleX: 0, angleY: 0, eyeL: 0, eyeR: 0, mouth: micLevel };
+
+            // ★追加: 口のロック中はマイク入力による口パクを強制カット
+            if ($('chk-lock-mouth') && $('chk-lock-mouth').checked) {
+                offset.mouth = 0;
+            }
+
+            // 呼吸と視線のゆらぎ
+            if ($('chk-breathing').checked) {
+                const now = Date.now();
+                offset.angleY = Math.sin(now / 600) * 5;
+
+                if (now > gazeTimer) {
+                    randomGazeX = (Math.random() - 0.5) * 15;
+                    randomGazeY = (Math.random() - 0.5) * 5;
+                    gazeTimer = now + 2000 + Math.random() * 2000;
+                }
+                offset.angleX += randomGazeX;
+                offset.angleY += randomGazeY;
+            }
+
+            // 自動まばたき
+            // ★追加: 目のロック中は自動まばたきも発動させない
+            if ($('chk-auto-blink').checked && !($('chk-lock-eye') && $('chk-lock-eye').checked)) {
+                if (Math.random() > 0.98 && blinkValue === 0) blinkValue = 1;
+                if (blinkValue > 0) {
+                    blinkValue += 0.2;
+                    let b = Math.sin(blinkValue * Math.PI);
+                    offset.eyeL = b * -100;
+                    offset.eyeR = b * -100;
+                    if (blinkValue >= 1) blinkValue = 0;
+                }
+            }
+            return offset;
+        }
+
+        // --- 古い applyAutoMotions は削除 ---
+        function drawFreeTransform(ctx, img, pts) {
+            const subdivs = 10;
+            const w = img.width, h = img.height;
+            const interp = (p0, p1, p2, p3, u, v) => ({
+                x: p0.x * (1 - u) * (1 - v) + p1.x * u * (1 - v) + p2.x * (1 - u) * v + p3.x * u * v,
+                y: p0.y * (1 - u) * (1 - v) + p1.y * u * (1 - v) + p2.y * (1 - u) * v + p3.y * u * v
+            });
+            for (let i = 0; i < subdivs; i++) {
+                for (let j = 0; j < subdivs; j++) {
+                    const u0 = i / subdivs, v0 = j / subdivs, u1 = (i + 1) / subdivs, v1 = (j + 1) / subdivs;
+                    const p00 = interp(pts[0], pts[1], pts[3], pts[2], u0, v0);
+                    const p10 = interp(pts[0], pts[1], pts[3], pts[2], u1, v0);
+                    const p01 = interp(pts[0], pts[1], pts[3], pts[2], u0, v1);
+                    const p11 = interp(pts[0], pts[1], pts[3], pts[2], u1, v1);
+                    const drawTri = (pA, pB, pC, uvA, uvB, uvC) => {
+                        ctx.save(); ctx.beginPath(); ctx.moveTo(pA.x, pA.y); ctx.lineTo(pB.x, pB.y); ctx.lineTo(pC.x, pC.y); ctx.closePath(); ctx.clip();
+                        const uA = uvA.x * w, vA = uvA.y * h, uB = uvB.x * w, vB = uvB.y * h, uC = uvC.x * w, vC = uvC.y * h;
+                        const d = uA * (vB - vC) - uB * (vA - vC) + uC * (vA - vB);
+                        if (Math.abs(d) < 0.0001) { ctx.restore(); return; }
+                        const a = (pA.x * (vB - vC) - pB.x * (vA - vC) + pC.x * (vA - vB)) / d, b = (pA.y * (vB - vC) - pB.y * (vA - vC) + pC.y * (vA - vB)) / d,
+                            c = (uA * (pB.x - pC.x) - uB * (pA.x - pC.x) + uC * (pA.x - pB.x)) / d, e = (uA * (pB.y - pC.y) - uB * (pA.y - pC.y) + uC * (pA.y - pB.y)) / d;
+                        ctx.transform(a, b, c, e, pA.x - a * uA - c * vA, pA.y - b * uA - e * vA);
+                        ctx.drawImage(img, -0.5, -0.5, w + 1, h + 1); ctx.restore();
+                    };
+                    drawTri(p00, p10, p01, { x: u0, y: v0 }, { x: u1, y: v0 }, { x: u0, y: v1 });
+                    drawTri(p11, p01, p10, { x: u1, y: v1 }, { x: u0, y: v1 }, { x: u1, y: v0 });
+                }
+            }
+        }
+
+        // --- S1. UIの非表示機能 ---
+        // ★追加: どこからでも呼べるように window オブジェクトに登録
+        window.toggleUIVisibility = function () {
+            const isHidden = $('ui-panel').classList.toggle('hidden');
+
+            if (isHidden) {
+                document.body.classList.add('ui-hidden');
+            } else {
+                document.body.classList.remove('ui-hidden');
+            }
+
+            // カメラ起動時のみプレビューの表示・非表示を切り替える
+            if (isCameraActive) {
+                $('video-preview').style.display = isHidden ? 'none' : 'block';
+            } else {
+                $('video-preview').style.display = 'none';
+            }
+
+            updateLayout();
+        };
+window.addEventListener('keydown', (e) => {
+            // 入力フォームなどでSpaceキーを押した場合は誤爆を防ぐ
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            if (e.code === 'Space') {
+                e.preventDefault();
+                window.toggleUIVisibility();
+            }
+
+            // --- 動的割り当てされたVRMの表情キー切り替え ---
+            const keyStr = e.key;
+            if (currentAppMode === 'vrm' && vrmEmotionShortcuts.hasOwnProperty(keyStr)) {
+                resetExpression();
+                const emotionName = vrmEmotionShortcuts[keyStr];
+                setVRMEmotion(emotionName);
+                showToast(emotionName === '' ? "😀 Normal" : `✨ ${emotionName}`);
+                return;
+            }
+
+            // 2Dドット絵モード用のレガシーショートカット
+            if (currentAppMode === '2d') {
+                if (e.key === '1') { resetExpression(); showToast("😀 通常"); }
+                if (e.key === '2') { resetExpression(); expressionOffset.angleZ = 50; showToast("💢 怒り"); }
+                if (e.key === '3') { resetExpression(); expressionOffset.eyeL = -100; expressionOffset.eyeR = -100; showToast("😲 驚き"); }
+                if (e.key === '4') { resetExpression(); expressionOffset.mouth = 50; showToast("😆 笑い"); }
+                if (e.key === '5') { resetExpression(); expressionOffset.opacity = -0.5; showToast("😳 照れ"); }
+            }
+        });
+
+        function resetExpression() {
+            expressionOffset = { angleX: 0, angleY: 0, angleZ: 0, eyeL: 0, eyeR: 0, mouth: 0, opacity: 0 };
+        }
+
+        // --- S2. センターリセット ---
+        function calibrateFace() {
+            // 現在のパラメータを「オフセット（ズレ）」として記録
+            faceOffset.angleX = lastRawRot.x;
+            faceOffset.angleY = lastRawRot.y;
+            faceOffset.angleZ = lastRawRot.z;
+        }// --- S3. 音声システム＆ボイスチェンジャー＆ミュート統合 ---
+        let micSource, pitchNode, monitorGain, recordDestination, recordGain;
+
+        async function initMic() {
+            // ★修正: ブラウザの自動再生ポリシー対策 (suspended状態の復帰)
+            if (audioContext) {
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                return;
+            }
+
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+                const blob = new Blob([pitchShifterCode], { type: 'application/javascript' });
+                await audioContext.audioWorklet.addModule(URL.createObjectURL(blob));
+
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                });
+                window.sharedAudioStream = stream;
+
+                micSource = audioContext.createMediaStreamSource(stream);
+                pitchNode = new AudioWorkletNode(audioContext, 'pitch-shifter');
+                monitorGain = audioContext.createGain();
+
+                // ★追加: 録画出力用の音量コントローラー
+                recordGain = audioContext.createGain();
+                recordDestination = audioContext.createMediaStreamDestination();
+
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                updateAudioRouting();
+                updatePitch();
+                updateMicLevel();
+            } catch (err) {
+                console.error("マイクの初期化に失敗:", err);
+            }
+        }
+
+        window.updateAudioRouting = async function () { // ★async を追加
+    if (!audioContext) return;
+
+    // ★追加: AudioContextが一時停止状態なら再開させる（ブラウザ制約対策）
+    if (audioContext.state === 'suspended') {
+        try {
+            await audioContext.resume();
+        } catch (e) {
+            console.warn("音声の再開に失敗しました", e);
+        }
+    }
+
+    if (!micSource) return;
+
+    micSource.disconnect();
+    pitchNode.disconnect();
+            monitorGain.disconnect();
+            if (recordGain) recordGain.disconnect();
+
+            const vcEnabled = $('chk-vc-enable') && $('chk-vc-enable').checked;
+            const monitorEnabled = $('chk-vc-monitor') && $('chk-vc-monitor').checked;
+            const isMuted = $('chk-mute-out') && $('chk-mute-out').checked; // ★ミュート判定
+
+            let processOutput = vcEnabled ? pitchNode : micSource;
+            if (vcEnabled) micSource.connect(pitchNode);
+
+            // 1. 口パク用（ミュート状態でも口は動かすので常に接続）
+            processOutput.connect(analyser);
+
+            // 2. 録画用出力（ミュートなら音量を0にする）
+            recordGain.gain.value = isMuted ? 0.0 : 1.0;
+            processOutput.connect(recordGain);
+            recordGain.connect(recordDestination);
+            window.processedAudioStream = recordDestination.stream;
+
+            // 3. モニター用（ミュートの時はモニターも切る）
+            monitorGain.gain.value = (monitorEnabled && !isMuted) ? 1.0 : 0.0;
+            processOutput.connect(monitorGain);
+            monitorGain.connect(audioContext.destination);
+        };
+
+        // スライダーで声の高さを変える
+        window.updatePitch = function () {
+            if (!pitchNode) return;
+            const semitones = parseInt($('slider-pitch').value);
+            $('val-pitch').textContent = semitones > 0 ? '+' + semitones : semitones;
+            // 半音からピッチ変更比率を計算 (2^(半音/12))
+            const ratio = Math.pow(2, semitones / 12);
+            pitchNode.port.postMessage({ pitchRatio: ratio });
+        };
+
+        function updateMicLevel() {
+            if (!analyser) return;
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+            let avg = sum / dataArray.length;
+
+            const sens = parseInt($('slider-mic-sens').value);
+            const noiseGate = parseInt($('slider-noise').value);
+
+            // ノイズゲート以下は口を動かさない
+            if (avg < noiseGate) {
+                micLevel = 0;
+            } else {
+                micLevel = Math.min(100, (avg / 128) * sens);
+            }
+            requestAnimationFrame(updateMicLevel);
+        }
+        // --- 厳格化: ページ離脱時にリソースを確実に解放 ---
+        window.addEventListener('beforeunload', () => {
+            if (isRecording) stopRecording(true);
+            if (video && video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+            if (window.sharedAudioStream) window.sharedAudioStream.getTracks().forEach(t => t.stop());
+            if (audioContext) audioContext.close();
+        });
+
+        let manualExpressions = {};
+        let activeVRMEmotion = ''; // 現在アクティブな感情
+let vrmEmotionShortcuts = {};
+        function buildExpressionUI(vrm) {
+            const sliderContainer = $('vrm-expressions-list');
+            const btnContainer = $('vrm-emotion-buttons');
+            sliderContainer.innerHTML = '';
+            btnContainer.innerHTML = '';
+            manualExpressions = {};
+            activeVRMEmotion = '';
+            vrmEmotionShortcuts = { "1": "" };
+
+            const expManager = vrm.expressionManager;
+            if (!expManager) return;
+
+            // 1. 【ボタン用】 優先的にボタンに割り当てたい名前（喜怒哀楽）
+            const presetNames = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
+            const allExps = expManager.expressions;
+            
+            // 「通常」ボタン（リセット用）
+            const normalBtn = document.createElement('button');
+            normalBtn.className = 'btn-primary emotion-btn';
+            normalBtn.style.cssText = 'width: calc(33% - 4px); padding: 5px; font-size: 0.7rem; margin: 0; background: #28a745;';
+            normalBtn.textContent = 'Normal [1]';
+            normalBtn.onclick = () => setVRMEmotion('');
+            btnContainer.appendChild(normalBtn);
+
+            let keyIndex = 2;
+            let guideText = "[1] 通常 ";
+
+            // 2. モデル内の【すべてのパーツ】をループ処理
+            allExps.forEach((exp) => {
+                const name = exp.name;
+                const lowerName = name.toLowerCase();
+
+                // 'neutral' だけは何も起きないので除外してOK
+                if (lowerName === 'neutral') return;
+
+                const displayName = name.replace(/^(vrm|vrmexpression|custom|expression)_/gi, '');
+
+                // --- A. 感情ボタンの作成 ---
+                // 名前が happy, angry 等を含んでいれば、9キーまでボタンを割り当てる
+                const isPreset = presetNames.some(p => lowerName.includes(p));
+                if (isPreset && keyIndex <= 9 && !vrmEmotionShortcuts.hasOwnProperty(keyIndex)) {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn-secondary emotion-btn';
+                    btn.id = `vrm-emotion-btn-${name}`;
+                    btn.style.cssText = 'width: calc(33% - 4px); padding: 5px; font-size: 0.6rem; margin: 0; overflow: hidden;';
+                    btn.textContent = `${displayName} [${keyIndex}]`;
+                    btn.onclick = () => setVRMEmotion(name);
+                    btnContainer.appendChild(btn);
+
+                    vrmEmotionShortcuts[keyIndex.toString()] = name;
+                    guideText += `[${keyIndex}] ${displayName} `;
+                    keyIndex++;
+                } 
+                
+                // --- B. スライダー（全パーツ）の作成 ---
+                // まばたき(Blink)、口の形(A,I,U)、眉(Brow)など、すべてここに表示されます！
+                manualExpressions[name] = 0;
+                const row = document.createElement('div');
+                row.className = 'flex-row';
+                row.style.cssText = 'margin-bottom: 4px; background: rgba(0,0,0,0.02); padding: 2px 5px; border-radius: 4px;';
+                
+                const label = document.createElement('label');
+                label.style.cssText = 'width: 110px; font-size: 0.6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0;';
+                label.title = name;
+                label.textContent = displayName;
+
+                const slider = document.createElement('input');
+                slider.type = 'range';
+                slider.id = `exp-slider-${name}`;
+                slider.min = "0";
+                slider.max = "100";
+                slider.value = "0";
+                slider.style.cssText = 'flex-grow: 1; margin: 0; height: 14px;';
+                slider.oninput = (e) => {
+                    manualExpressions[name] = e.target.value / 100;
+                };
+
+                row.appendChild(label);
+                row.appendChild(slider);
+                sliderContainer.appendChild(row);
+            });
+
+            const guideElem = $('expression-key-guide');
+            if (guideElem) guideElem.textContent = guideText;
+        }
+
+        // ★選択中の感情ボタンの見た目（色）を切り替える処理
+        function setVRMEmotion(name) {
+            activeVRMEmotion = name;
+
+            // すべての感情ボタンのスタイルを一旦灰色にリセット
+            document.querySelectorAll('.emotion-btn').forEach(btn => {
+                btn.style.background = '#6c757d';
+                btn.style.color = 'white';
+            });
+
+            if (name === '') {
+                // 通常ボタンを緑色にする
+                const normalBtn = document.querySelector('.emotion-btn');
+                if (normalBtn) normalBtn.style.background = '#28a745';
+                resetVRMExpressions();
+            } else {
+                // 選択されたボタンを青色にする
+                const activeBtn = $(`vrm-emotion-btn-${name}`);
+                if (activeBtn) activeBtn.style.background = '#007bff';
+            }
+        }
+
+        function resetVRMExpressions() {
+            for (let name in manualExpressions) {
+                manualExpressions[name] = 0;
+                const slider = $(`exp-slider-${name}`);
+                if (slider) slider.value = 0;
+            }
+        }
+        // ★追加: アニメーション用変数
+        let vrmMixer = null;
+        let currentAction = null;
+        let isAnimationPlaying = false; // モーション再生中フラグ
+        let activePresetPose = null;    // ★追加: 現在の固定ポーズ
+
+        async function loadVRMAnimation(file) {
+            if (!currentVrm) { alert("先にキャラクター(VRM)を読み込んでください。"); return; }
+            $('loading-overlay').style.display = 'flex';
+            $('loading-text').textContent = "モーションを解析中...";
+
+            const url = URL.createObjectURL(file);
+            const loader = new window.GLTFLoader();
+
+            // ★VRM Animation 3.0 用のプラグイン登録
+            loader.register((parser) => new window.VRMAnimationLoaderPlugin(parser));
+
+            loader.load(url, (gltf) => {
+                const vrmAnimations = gltf.userData.vrmAnimations;
+                if (vrmAnimations && vrmAnimations.length > 0) {
+                    if (!vrmMixer) vrmMixer = new window.THREE.AnimationMixer(currentVrm.scene);
+                    if (currentAction) currentAction.stop();
+
+                    const clip = window.createVRMAnimationClip(vrmAnimations[0], currentVrm);
+                    currentAction = vrmMixer.clipAction(clip);
+                    currentAction.play();
+                    isAnimationPlaying = true;
+
+                    $('status-text').textContent = `モーション読込完了 (${file.name})`;
+                } else {
+                    alert("アニメーションデータが見つかりません。");
+                }
+                $('loading-overlay').style.display = 'none';
+            }, undefined, (err) => {
+                console.error(err);
+                alert("モーションの読み込みに失敗しました。");
+                $('loading-overlay').style.display = 'none';
+            });
+        }
+        function stopVRMAnimation() {
+            if (currentAction) currentAction.stop();
+            isAnimationPlaying = false;
+            activePresetPose = null; // プリセットポーズを解除
+
+            // ★修正: スムージング用の変数も完全に初期化し、過去のポーズの残像（暴れ）を消去する
+            smoothPose = {
+        lArm: 0, rArm: 0, lFore: 0, rFore: 0, lLeg: 0, rLeg: 0,
+        lArmX: 0, rArmX: 0, lArmY: 0, rArmY: 0,
+        lForeX: 0, rForeX: 0, lForeY: 0, rForeY: 0,
+        // ★手首の初期化を追加
+        lHandX: 0, lHandY: 0, lHandZ: 0,
+        rHandX: 0, rHandY: 0, rHandZ: 0
+    };
+
+            // 骨の回転をリセット（ハの字デフォルト）
+            if (currentVrm) {
+                const humanoid = currentVrm.humanoid;
+                const bones = ['leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftUpperLeg', 'rightUpperLeg', 'leftHand', 'rightHand'];
+                bones.forEach(name => {
+                    const bone = humanoid.getNormalizedBoneNode(name);
+                    if (bone) bone.rotation.set(0, 0, 0);
+                });
+                const lArm = humanoid.getNormalizedBoneNode('leftUpperArm');
+                const rArm = humanoid.getNormalizedBoneNode('rightUpperArm');
+                if (lArm) lArm.rotation.set(0, 0, 1.2);
+                if (rArm) rArm.rotation.set(0, 0, -1.2);
+            }
+        }
+        // ★修正: プリセットポーズに「大の字」を追加
+        function playPresetPose(poseName) {
+            stopVRMAnimation(); // まずリセット
+            activePresetPose = poseName;
+            const humanoid = currentVrm.humanoid;
+            const lArm = humanoid.getNormalizedBoneNode('leftUpperArm');
+            const rArm = humanoid.getNormalizedBoneNode('rightUpperArm');
+
+            if (poseName === 'wave') {
+                if (rArm) rArm.rotation.set(0, 0, -2.5);
+                const rFore = humanoid.getNormalizedBoneNode('rightLowerArm');
+                if (rFore) rFore.rotation.set(0, 0, -0.5);
+            } else if (poseName === 'star') {
+                // 大の字（両腕を真横に広げる）
+                if (lArm) lArm.rotation.set(0, 0, 1.55);
+                if (rArm) rArm.rotation.set(0, 0, -1.55);
+            }
+        }
+        // ページの読み込みが終わったら実行
+window.addEventListener('DOMContentLoaded', () => {
+    const mp4Option = document.querySelector('#sel-record-format option[value="mp4"]');
+    
+    // WebCodecs (VideoEncoder) が使えるかチェック
+    const isWebCodecsSupported = typeof VideoEncoder !== 'undefined' && typeof AudioEncoder !== 'undefined';
+
+    if (!isWebCodecsSupported && mp4Option) {
+        // MP4が使えないブラウザの場合
+        mp4Option.disabled = true;
+        mp4Option.textContent = "🎥 MP4 (非対応ブラウザです)";
+        
+        // デフォルトをWebMに変更
+        document.getElementById('sel-record-format').value = 'webm';
+        console.warn("このブラウザはWebCodecs(MP4録画)に対応していないため、WebMを推奨します。");
+    }
+});
+window.addEventListener('resize', () => {
+    updateLayout();
+});
+    </script>
 </body>
+
 </html>
