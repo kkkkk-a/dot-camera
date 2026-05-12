@@ -1162,13 +1162,26 @@ window.openOBSWindow = function() {
 
                     // キャンバス映像をエンコーダーに流し込む
                     mp4StartTime = performance.now();
+                    const fps = 30;
+                    const frameInterval = 1000 / fps;
+                    let expectedNextTime = performance.now() + frameInterval;
+
                     function sendVideoFrame() {
                         if (!isRecording) return;
-                        const timestamp = (performance.now() - mp4StartTime) * 1000;
+                        
+                        const now = performance.now();
+                        const timestamp = (now - mp4StartTime) * 1000; // マイクロ秒
+                        
+                        // フレームを取得してエンコード
                         const frame = new VideoFrame(mainCan, { timestamp });
                         videoEncoder.encode(frame);
                         frame.close();
-                        mp4VideoTimer = requestAnimationFrame(sendVideoFrame);
+
+                        // ★修正: requestAnimationFrame ではなく、時間指定の setTimeout で発火させる
+                        // これにより、別のタブを見ていても映像の録画時間がズレにくくなります
+                        expectedNextTime += frameInterval;
+                        const delay = Math.max(0, expectedNextTime - performance.now());
+                        mp4VideoTimer = setTimeout(sendVideoFrame, delay);
                     }
                     sendVideoFrame();
                 }
@@ -1207,7 +1220,7 @@ window.openOBSWindow = function() {
                 downloadBlob(blob, exportFileName);
 
             } else if (recordFormat === 'mp4') {
-                cancelAnimationFrame(mp4VideoTimer);
+                clearTimeout(mp4VideoTimer); 
                 if (recScriptProcessor) recScriptProcessor.disconnect();
                 if (recAudioContext) { recAudioContext.close(); recAudioContext = null; }
 
